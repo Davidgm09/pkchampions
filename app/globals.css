@@ -1,26 +1,102 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Champion color palette */
+  --color-champ-bg:        #0A0E1A;
+  --color-champ-surface:   #111827;
+  --color-champ-elevated:  #1C2333;
+  --color-champ-blue:      #3B82F6;
+  --color-champ-blue-glow: #60A5FA;
+  --color-champ-gold:      #FBBF24;
+  --color-champ-gold-dark: #D97706;
+  --color-champ-success:   #22C55E;
+  --color-champ-danger:    #EF4444;
+  --color-champ-muted:     #6B7280;
+  --color-champ-border:    #1F2937;
+
+  /* Type colors */
+  --color-type-fire:     #EF4444;
+  --color-type-water:    #3B82F6;
+  --color-type-grass:    #22C55E;
+  --color-type-electric: #EAB308;
+  --color-type-psychic:  #A855F7;
+  --color-type-dragon:   #6366F1;
+  --color-type-dark:     #374151;
+  --color-type-steel:    #9CA3AF;
+  --color-type-fighting: #B45309;
+  --color-type-ghost:    #7C3AED;
+  --color-type-normal:   #6B7280;
+  --color-type-ice:      #67E8F9;
+  --color-type-rock:     #A16207;
+  --color-type-ground:   #D97706;
+  --color-type-poison:   #A21CAF;
+  --color-type-bug:      #65A30D;
+  --color-type-fairy:    #EC4899;
+  --color-type-flying:   #7DD3FC;
+
+  /* Fonts */
+  --font-display: var(--font-rajdhani), "Rajdhani", system-ui, sans-serif;
+  --font-body:    var(--font-inter), "Inter", system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-champ-bg);
+  color: #F9FAFB;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Range input reset so our Tailwind classes work */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--color-champ-border);
+  border-radius: 9999px;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-champ-blue);
+  border: 2px solid var(--color-champ-bg);
+  margin-top: -5px;
+  transition: background 0.15s;
+}
+
+input[type='range']:hover::-webkit-slider-thumb {
+  background: var(--color-champ-blue-glow);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-champ-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-champ-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-champ-muted);
 }
