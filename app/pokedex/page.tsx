@@ -3,8 +3,7 @@ import { getPokemon } from '@/lib/pokeapi'
 import { CHAMPIONS_ROSTER } from '@/data/regulation-mb'
 import type { ChampionsPokemonEntry } from '@/data/regulation-mb'
 import type { NormalizedPokemon } from '@/types/pokemon'
-import PokemonCard from '@/components/pokedex/PokemonCard'
-import { TYPE_NAMES } from '@/components/pokedex/TypeBadge'
+import PokedexClient from '@/components/pokedex/PokedexClient'
 
 export const metadata: Metadata = {
   title: 'Pokédex',
@@ -27,8 +26,6 @@ export default async function PokedexPage() {
       item.pokemon !== null
     )
 
-  const TYPES = ['fire','water','grass','electric','psychic','dragon','steel','ghost','fighting','fairy','normal','ice','rock','ground','poison','bug','flying','dark']
-
   return (
     <div className="space-y-6">
       {/* Cabecera */}
@@ -44,25 +41,7 @@ export default async function PokedexPage() {
         </span>
       </div>
 
-      {/* Filtro por tipo */}
-      <div className="bg-champ-surface border border-champ-border rounded-xl p-4 flex flex-wrap gap-2 items-center">
-        <span className="text-champ-muted text-sm font-body mr-1">Tipo:</span>
-        {TYPES.map((type) => (
-          <button
-            key={type}
-            className="px-2.5 py-1 text-xs rounded border border-champ-border text-champ-muted hover:text-white hover:border-champ-blue font-body transition-colors"
-          >
-            {TYPE_NAMES[type] ?? type}
-          </button>
-        ))}
-      </div>
-
-      {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {items.map(({ entry, pokemon }) => (
-          <PokemonCard key={entry.id} pokemon={pokemon} entry={entry} />
-        ))}
-      </div>
+      <PokedexClient items={items} />
     </div>
   )
 }
