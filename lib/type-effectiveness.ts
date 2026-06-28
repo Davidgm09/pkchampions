@@ -46,13 +46,16 @@ export interface OffensiveCoverage {
   x2: string[]
 }
 
-// Best multiplier any of the attacker's types achieves against each defending type
+// Offensive STAB coverage for a Pokémon's types.
+// ×4 = every STAB type deals ×2 to this defending type (combined product ≥ 4)
+// ×2 = at least one STAB type deals ×2 (but not all of them)
 export function calcOffensiveCoverage(attackerTypes: string[]): OffensiveCoverage {
   const x4: string[] = []
   const x2: string[] = []
   for (const def of ALL_TYPES) {
-    const best = Math.max(...attackerTypes.map((atk) => getMultiplier(atk, def)))
-    if (best >= 4) x4.push(def)
+    const best     = Math.max(...attackerTypes.map((atk) => getMultiplier(atk, def)))
+    const combined = attackerTypes.reduce((acc, atk) => acc * getMultiplier(atk, def), 1)
+    if (combined >= 4) x4.push(def)
     else if (best >= 2) x2.push(def)
   }
   return { x4, x2 }

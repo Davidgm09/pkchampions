@@ -8,6 +8,9 @@ import type { MegaEvolution } from '@/types/champions'
 import type { ChampionsPokemonEntry } from '@/data/regulation-mb'
 import type { ChampionsUsageEntry } from '@/lib/champions-meta'
 import TypeBadge from '@/components/pokedex/TypeBadge'
+import { calcFinalStat } from '@/lib/sp-utils'
+import type { StatID } from '@/types/pokemon'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 interface Props {
   pokemon: NormalizedPokemon
@@ -82,6 +85,7 @@ function StatRow({ stat, value, max = 255, color, base }: {
 }
 
 export default function PokemonDetail({ pokemon, megas = [], entry, metaEntry }: Props) {
+  const { t } = useLanguage()
   const { types, baseStats, abilities, artwork, sprite, id, height, weight, totalBST } = pokemon
   const paddedId = String(id).padStart(4, '0')
   const imgSrc = artwork ?? sprite
@@ -99,10 +103,11 @@ export default function PokemonDetail({ pokemon, megas = [], entry, metaEntry }:
         </div>
         {metaEntry && (
           <span className="text-champ-muted font-body text-sm">
-            Rank <span className="text-white font-semibold">#{metaEntry.rank}</span>
+            {'Rank '}
+            <span className="text-white font-semibold">#{metaEntry.rank}</span>
             {' · '}
             <span className="text-champ-blue-glow font-semibold">{(metaEntry.usage_rate * 100).toFixed(2)}%</span>
-            {' uso'}
+            {' '}{t('dex.usageLabel')}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -112,10 +117,16 @@ export default function PokemonDetail({ pokemon, megas = [], entry, metaEntry }:
             </span>
           )}
           <Link
+            href={`/optimizador?pk=${entry.id}`}
+            className="px-3 py-1.5 text-sm font-semibold bg-champ-elevated border border-champ-border text-champ-muted rounded-lg hover:text-white hover:border-champ-blue/50 transition-colors font-body whitespace-nowrap"
+          >
+            {t('dex.optimizeBtn')}
+          </Link>
+          <Link
             href={`/calculator?atacante=${entry.id}`}
             className="px-3 py-1.5 text-sm font-semibold bg-champ-gold/15 border border-champ-gold/50 text-champ-gold rounded-lg hover:bg-champ-gold/25 transition-colors font-body whitespace-nowrap"
           >
-            Abrir en Calculadora
+            {t('dex.calcBtn')}
           </Link>
         </div>
       </div>
@@ -146,7 +157,7 @@ export default function PokemonDetail({ pokemon, megas = [], entry, metaEntry }:
           {/* Base stats */}
           <div>
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-bold text-champ-muted uppercase tracking-widest font-body">Stats Base</span>
+              <span className="text-xs font-bold text-champ-muted uppercase tracking-widest font-body">{t('dex.statsBase')}</span>
               <span className="text-sm font-mono font-bold text-champ-gold">BST {totalBST}</span>
             </div>
             <div className="space-y-2.5">
@@ -158,6 +169,36 @@ export default function PokemonDetail({ pokemon, megas = [], entry, metaEntry }:
                   color={STAT_CONFIG[stat]?.color ?? '#60a5fa'}
                 />
               ))}
+            </div>
+          </div>
+
+          {/* Stats a nivel 50 */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-champ-muted uppercase tracking-widest font-body">{t('dex.statsLv50')}</span>
+              <div className="flex gap-2 text-[10px] font-body text-champ-muted">
+                <span className="px-1.5 py-0.5 rounded border border-champ-border">0 SP</span>
+                <span className="px-1.5 py-0.5 rounded border border-champ-gold/40 text-champ-gold">32 SP</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {(Object.entries(baseStats) as [StatID, number][]).map(([stat, base]) => {
+                const min = calcFinalStat(stat, base, 0,  1.0)
+                const max = calcFinalStat(stat, base, 32, 1.0)
+                return (
+                  <div key={stat} className="flex items-center gap-2.5">
+                    <span className="w-8 text-xs font-semibold font-body text-right shrink-0" style={{ color: STAT_CONFIG[stat]?.color }}>
+                      {STAT_CONFIG[stat]?.label}
+                    </span>
+                    <span className="w-9 text-sm font-bold font-mono text-right shrink-0 text-champ-muted">{min}</span>
+                    <div className="flex-1 h-1.5 bg-champ-elevated rounded-full overflow-hidden relative">
+                      <div className="absolute inset-y-0 left-0 rounded-full opacity-30" style={{ width: `${(min / 400) * 100}%`, backgroundColor: STAT_CONFIG[stat]?.color }} />
+                      <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${(max / 400) * 100}%`, backgroundColor: STAT_CONFIG[stat]?.color }} />
+                    </div>
+                    <span className="w-9 text-sm font-bold font-mono shrink-0 text-champ-gold">{max}</span>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -191,6 +232,8 @@ export default function PokemonDetail({ pokemon, megas = [], entry, metaEntry }:
               </div>
             )
           })}
+
+
         </div>
       </div>
     </div>

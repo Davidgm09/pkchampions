@@ -3,6 +3,7 @@ import { getPokemon } from '@/lib/pokeapi'
 import { CHAMPIONS_ROSTER } from '@/data/regulation-mb'
 import type { ChampionsPokemonEntry } from '@/data/regulation-mb'
 import type { NormalizedPokemon } from '@/types/pokemon'
+import { getPokemonMeta } from '@/lib/champions-meta'
 import PokedexClient from '@/components/pokedex/PokedexClient'
 
 export const metadata: Metadata = {
@@ -21,27 +22,11 @@ export default async function PokedexPage() {
       pokemon: results[i].status === 'fulfilled'
         ? (results[i] as PromiseFulfilledResult<NormalizedPokemon>).value
         : null,
+      rank: getPokemonMeta(entry.displayName)?.rank ?? null,
     }))
-    .filter((item): item is { entry: ChampionsPokemonEntry; pokemon: NormalizedPokemon } =>
+    .filter((item): item is { entry: ChampionsPokemonEntry; pokemon: NormalizedPokemon; rank: number | null } =>
       item.pokemon !== null
     )
 
-  return (
-    <div className="space-y-6">
-      {/* Cabecera */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="font-display text-4xl font-bold text-white">Pokédex</h1>
-          <p className="text-champ-muted font-body text-sm mt-1">
-            Regulación M-B · {items.length} Pokémon disponibles
-          </p>
-        </div>
-        <span className="text-xs text-champ-blue-glow border border-champ-blue/40 rounded-full px-3 py-1 font-body">
-          Reg M-B
-        </span>
-      </div>
-
-      <PokedexClient items={items} />
-    </div>
-  )
+  return <PokedexClient items={items} total={items.length} />
 }

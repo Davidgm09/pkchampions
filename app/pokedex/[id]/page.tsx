@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 import { getPokemon } from '@/lib/pokeapi'
 import { getMegas } from '@/data/mega-stones'
 import { ROSTER_BY_ID } from '@/data/regulation-mb'
@@ -54,7 +55,7 @@ export default async function PokemonDetailPage({ params }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm text-champ-muted font-body">
-        <a href="/pokedex" className="hover:text-white transition-colors">Pokédex</a>
+        <Link href="/pokedex" className="hover:text-white transition-colors">Pokédex</Link>
         <span>/</span>
         <span className="text-white">{displayTitle}</span>
       </div>
@@ -76,7 +77,7 @@ export default async function PokemonDetailPage({ params }: Props) {
           <TypeEffectivenessTable
             key={mega.megaName}
             types={mega.megaTypes}
-            title={`Efectividad — ${mega.megaName}`}
+            megaName={mega.megaName}
           />
         )
       })}

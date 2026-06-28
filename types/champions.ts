@@ -116,6 +116,8 @@ export interface DamageCalcInput {
 
 export interface DamageCalcResult {
   move: string
+  moveType: string
+  moveCategory: 'Physical' | 'Special' | 'Status'
   attacker: string
   defender: string
   damage: {

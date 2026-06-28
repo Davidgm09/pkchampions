@@ -1,6 +1,10 @@
+'use client'
+
+import Link from 'next/link'
 import type { ChampionsUsageEntry } from '@/lib/champions-meta'
 import type { EnrichedMove } from '@/lib/moves'
 import TypeBadge from '@/components/pokedex/TypeBadge'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 interface Props {
   data: ChampionsUsageEntry
@@ -9,12 +13,6 @@ interface Props {
   megaName?: string
   enrichedMegaMoves?: EnrichedMove[]
   updatedAt: string
-}
-
-const CATEGORY_LABEL: Record<string, string> = {
-  Physical: 'Físico',
-  Special:  'Especial',
-  Status:   'Estado',
 }
 
 const CATEGORY_COLOR: Record<string, string> = {
@@ -40,13 +38,7 @@ function UsageRow({ name, usage, sprite }: { name: string; usage: number; sprite
   return (
     <div className="flex items-center gap-2.5">
       {sprite && (
-        <img
-          src={sprite}
-          alt={name}
-          width={24}
-          height={24}
-          className="object-contain shrink-0 w-6 h-6"
-        />
+        <img src={sprite} alt={name} width={24} height={24} className="object-contain shrink-0 w-6 h-6" />
       )}
       <span className="text-sm text-white font-body truncate w-32 shrink-0">{name}</span>
       <UsageBar pct={usage} />
@@ -60,6 +52,8 @@ function itemSprite(name: string): string {
 }
 
 function MoveCard({ move }: { move: EnrichedMove }) {
+  const { t } = useLanguage()
+  const catKey = move.category?.toLowerCase() as 'physical' | 'special' | 'status' | undefined
   return (
     <div className="bg-champ-elevated border border-champ-border rounded-xl p-3 flex flex-col gap-2 hover:border-champ-blue/40 transition-colors">
       <div className="flex items-start justify-between gap-2">
@@ -70,9 +64,9 @@ function MoveCard({ move }: { move: EnrichedMove }) {
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         {move.type && <TypeBadge type={move.type} size="sm" />}
-        {move.category && (
-          <span className={`text-xs font-body ${CATEGORY_COLOR[move.category] ?? 'text-champ-muted'}`}>
-            {CATEGORY_LABEL[move.category] ?? move.category}
+        {catKey && (
+          <span className={`text-xs font-body ${CATEGORY_COLOR[move.category!] ?? 'text-champ-muted'}`}>
+            {t(`cat.${catKey}`)}
           </span>
         )}
         {move.power != null && (
@@ -84,8 +78,12 @@ function MoveCard({ move }: { move: EnrichedMove }) {
 }
 
 function TeammateCard({ teammate }: { teammate: { id: number; name: string; usage: number } }) {
+  const slug = teammate.name.toLowerCase().replace(/\s+/g, '-')
   return (
-    <div className="flex flex-col items-center gap-2 p-4 bg-champ-elevated border border-champ-border rounded-xl hover:border-champ-blue/40 transition-colors min-w-[110px]">
+    <Link
+      href={`/pokedex/${slug}`}
+      className="flex flex-col items-center gap-2 p-4 bg-champ-elevated border border-champ-border rounded-xl hover:border-champ-blue/40 transition-colors min-w-[110px]"
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${teammate.id}.png`}
@@ -96,7 +94,7 @@ function TeammateCard({ teammate }: { teammate: { id: number; name: string; usag
       />
       <span className="text-sm text-white font-body text-center leading-tight">{teammate.name}</span>
       <span className="text-xs font-mono text-champ-muted">{(teammate.usage * 100).toFixed(1)}%</span>
-    </div>
+    </Link>
   )
 }
 
@@ -111,29 +109,25 @@ function MetaBlock({
   title: string
   isGold?: boolean
 }) {
+  const { t } = useLanguage()
   const headerColor = isGold ? 'text-champ-gold' : 'text-white'
   const border = isGold ? 'border-champ-gold/30' : 'border-champ-border'
 
   return (
     <div className={`bg-champ-surface border ${border} rounded-2xl overflow-hidden`}>
-      {/* Block header */}
       <div className="px-6 py-4 border-b border-champ-border/60 flex items-center justify-between flex-wrap gap-2">
         <h2 className={`font-display text-xl font-bold ${headerColor}`}>{title}</h2>
-        <div className="flex items-center gap-3">
-          <span className="text-champ-muted text-xs font-body">Rank #{entry.rank}</span>
-          <span className="text-sm font-mono font-bold text-champ-blue-glow">
-            {(entry.usage_rate * 100).toFixed(2)}% uso
-          </span>
-        </div>
+        <span className="text-sm font-body text-champ-muted">
+          {t('meta.rankUsage', { rank: String(entry.rank), pct: (entry.usage_rate * 100).toFixed(2) })}
+        </span>
       </div>
 
       <div className="p-6 space-y-8">
-        {/* Abilities + Items */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {entry.top_abilities.length > 0 && (
             <div>
               <p className="text-xs font-bold text-champ-muted uppercase tracking-widest mb-3 font-body">
-                Habilidades
+                {t('meta.abilities')}
               </p>
               <div className="space-y-2">
                 {entry.top_abilities.map((a) => <UsageRow key={a.name} name={a.name} usage={a.usage} />)}
@@ -143,7 +137,7 @@ function MetaBlock({
           {entry.top_items.length > 0 && (
             <div>
               <p className="text-xs font-bold text-champ-muted uppercase tracking-widest mb-3 font-body">
-                Objetos
+                {t('meta.items')}
               </p>
               <div className="space-y-2">
                 {entry.top_items.map((it) => (
@@ -154,11 +148,10 @@ function MetaBlock({
           )}
         </div>
 
-        {/* Moves */}
         {moves.length > 0 && (
           <div>
             <p className="text-xs font-bold text-champ-muted uppercase tracking-widest mb-3 font-body">
-              Movimientos
+              {t('meta.moves')}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {moves.map((m) => <MoveCard key={m.name} move={m} />)}
@@ -166,14 +159,13 @@ function MetaBlock({
           </div>
         )}
 
-        {/* Teammates */}
         {entry.top_teammates.length > 0 && (
           <div>
             <p className="text-xs font-bold text-champ-muted uppercase tracking-widest mb-3 font-body">
-              Compañeros frecuentes
+              {t('dex.teammates')}
             </p>
             <div className="flex flex-wrap gap-2.5">
-              {entry.top_teammates.map((t) => <TeammateCard key={t.name} teammate={t} />)}
+              {entry.top_teammates.map((tm) => <TeammateCard key={tm.name} teammate={tm} />)}
             </div>
           </div>
         )}
@@ -185,7 +177,9 @@ function MetaBlock({
 export default function ChampionsMetaSection({
   data, enrichedMoves, megaData, megaName, enrichedMegaMoves = [], updatedAt,
 }: Props) {
-  const date = new Date(updatedAt).toLocaleDateString('es-ES', {
+  const { t, lang } = useLanguage()
+  const locale = lang === 'es' ? 'es-ES' : 'en-US'
+  const date = new Date(updatedAt).toLocaleDateString(locale, {
     day: 'numeric', month: 'long', year: 'numeric',
   })
 
@@ -196,7 +190,7 @@ export default function ChampionsMetaSection({
         <MetaBlock entry={megaData} moves={enrichedMegaMoves} title={`Meta — ${megaName}`} isGold />
       )}
       <p className="text-xs text-champ-muted font-body text-right">
-        Datos: PlayDitto · {data.rank !== undefined ? 'Temporada 1' : '—'} · Actualizado {date}
+        {t('meta.updatedAt', { date })}
       </p>
     </div>
   )

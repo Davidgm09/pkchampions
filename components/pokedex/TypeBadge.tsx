@@ -1,3 +1,7 @@
+'use client'
+
+import { useLanguage } from '@/contexts/LanguageContext'
+
 export const TYPE_NAMES: Record<string, string> = {
   fire:     'Fuego',
   water:    'Agua',
@@ -54,15 +58,15 @@ const SIZE_CLASSES = {
 }
 
 export default function TypeBadge({ type, size = 'md' }: TypeBadgeProps) {
+  const { t } = useLanguage()
   const key = type.toLowerCase()
   const colors = TYPE_SOLID[key] ?? 'bg-champ-elevated text-white'
-  const displayName = TYPE_NAMES[key] ?? type
 
   return (
     <span
       className={`inline-flex items-center font-bold uppercase rounded font-body ${colors} ${SIZE_CLASSES[size]}`}
     >
-      {displayName}
+      {t('type.' + key)}
     </span>
   )
 }

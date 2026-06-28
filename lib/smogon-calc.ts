@@ -1,5 +1,3 @@
-'use client'
-
 import { Pokemon, Move, Field, calculate, Generations } from '@smogon/calc'
 import type { DamageCalcInput, DamageCalcResult } from '@/types/champions'
 import { spSpreadToEVs } from '@/lib/sp-utils'
@@ -112,6 +110,8 @@ export function runDamageCalc(input: DamageCalcInput): DamageCalcResult {
 
   return {
     move: input.move,
+    moveType: move.type as string,
+    moveCategory: move.category as 'Physical' | 'Special' | 'Status',
     attacker: input.attacker.species,
     defender: input.defender.species,
     damage: { min: minDmg, max: maxDmg, rolls },

@@ -1,5 +1,3 @@
-'use client'
-
 import { Pokemon, Move, Field, calculate, Generations } from '@smogon/calc'
 import { spToEV, calcFinalStat, getNatureMods } from '@/lib/sp-utils'
 import type { NatureName, SPSpread } from '@/types/champions'

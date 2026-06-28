@@ -5,6 +5,7 @@ import type { SPSpread } from '@/types/champions'
 import { SP_TOTAL, SP_MAX_PER_STAT, remainingSP, isValidSpread } from '@/types/champions'
 import type { BaseStats, StatID } from '@/types/pokemon'
 import { calcFinalStat, getNatureMods } from '@/lib/sp-utils'
+import { useLanguage } from '@/contexts/LanguageContext'
 
 const STATS: { id: StatID; label: string; color: string }[] = [
   { id: 'hp',  label: 'HP',  color: 'accent-champ-success' },
@@ -40,6 +41,7 @@ export default function SPSlider({
   onChange,
 }: SPSliderProps) {
   const [spread, setSpread] = useState<SPSpread>(initialSpread)
+  const { t } = useLanguage()
   const natureMods = getNatureMods(nature)
 
   const remaining = remainingSP(spread)
@@ -67,24 +69,23 @@ export default function SPSlider({
 
   return (
     <div className="bg-champ-surface border border-champ-border rounded-xl p-5 space-y-4">
-      {/* Header with total bar */}
       <div className="flex items-center justify-between">
-        <h3 className="font-display text-lg font-bold text-white">Spread SP</h3>
+        <h3 className="font-display text-lg font-bold text-white">{t('calc.spreadSP')}</h3>
         <button
           onClick={handleReset}
           className="text-xs text-champ-muted hover:text-white font-body transition-colors"
         >
-          Reiniciar
+          {t('common.reset')}
         </button>
       </div>
 
       <div className="space-y-1">
         <div className="flex justify-between text-xs font-body">
           <span className={remaining === 0 ? 'text-champ-gold font-bold' : 'text-champ-muted'}>
-            {SP_TOTAL - remaining} / {SP_TOTAL} SP usados
+            {t('calc.spUsed', { used: String(SP_TOTAL - remaining), total: String(SP_TOTAL) })}
           </span>
           <span className={remaining > 0 ? 'text-champ-success' : 'text-champ-muted'}>
-            {remaining} restantes
+            {t('calc.spRemaining', { remaining: String(remaining) })}
           </span>
         </div>
         <div className="h-2 bg-champ-border rounded-full overflow-hidden">
@@ -97,7 +98,6 @@ export default function SPSlider({
         </div>
       </div>
 
-      {/* Stat sliders */}
       <div className="space-y-3">
         {STATS.map(({ id, label, color }) => {
           const sp = spread[id]
@@ -174,7 +174,7 @@ export default function SPSlider({
 
       {!valid && (
         <p className="text-champ-danger text-xs font-body text-center">
-          Spread inválido — supera los límites
+          {t('calc.invalid')}
         </p>
       )}
     </div>

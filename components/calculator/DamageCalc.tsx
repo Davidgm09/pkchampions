@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import type { DamageCalcInput, DamageCalcResult, NatureName, PokemonStatus } from '@/types/champions'
 import { EMPTY_SP_SPREAD } from '@/types/champions'
 import { runDamageCalc, toSmogonSpecies } from '@/lib/smogon-calc'
@@ -14,8 +15,30 @@ import { calcFinalStat, getNatureMods } from '@/lib/sp-utils'
 import { getBaseStats } from '@/lib/base-stats'
 import SPSlider from '@/components/calculator/SPSlider'
 import PokemonPicker from '@/components/calculator/PokemonPicker'
+import MoveInput from '@/components/optimizer/MoveInput'
+import AbilityInput from '@/components/team/AbilityInput'
+import ItemInput from '@/components/team/ItemInput'
+import SpreadComparator from '@/components/calculator/SpreadComparator'
+import ErrorToast from '@/components/ui/ErrorToast'
+import type { PokemonSide } from '@/components/calculator/calc-types'
+import { getKOBadge, KO_BADGE_CLS, KO_BORDER_CLS, onlyNonZero } from '@/components/calculator/calc-types'
+import SavedSpreads, { SaveButton, useSavedSpreads } from '@/components/calculator/SavedSpreads'
+import { useLanguage } from '@/contexts/LanguageContext'
+import { natureLabel } from '@/lib/nature-names'
+import { fetchAbilityES } from '@/lib/ability-names'
+import { fetchItemES } from '@/lib/item-names'
+import { fetchMoveNameES } from '@/lib/move-names'
 
 // ── Constants ────────────────────────────────────────────────────────────────
+
+const TYPE_BG: Record<string, string> = {
+  Normal: 'bg-type-normal', Fire: 'bg-type-fire', Water: 'bg-type-water',
+  Electric: 'bg-type-electric', Grass: 'bg-type-grass', Ice: 'bg-type-ice',
+  Fighting: 'bg-type-fighting', Poison: 'bg-type-poison', Ground: 'bg-type-ground',
+  Flying: 'bg-type-flying', Psychic: 'bg-type-psychic', Bug: 'bg-type-bug',
+  Rock: 'bg-type-rock', Ghost: 'bg-type-ghost', Dragon: 'bg-type-dragon',
+  Dark: 'bg-type-dark', Steel: 'bg-type-steel', Fairy: 'bg-type-fairy',
+}
 
 const NATURES: NatureName[] = [
   'Hardy','Lonely','Brave','Adamant','Naughty',
@@ -35,33 +58,6 @@ const GOLD_ON   = 'bg-champ-gold border-champ-gold text-black'
 const GOLD_OFF  = 'border-champ-gold/30 text-champ-gold hover:border-champ-gold'
 
 // ── State types ──────────────────────────────────────────────────────────────
-
-interface PokemonSide {
-  entry:        ChampionsPokemonEntry | null
-  nature:       NatureName
-  spSpread:     typeof EMPTY_SP_SPREAD
-  ability:      string
-  item:         string
-  selectedMega: MegaEvolution | null
-  status:       PokemonStatus
-  boostAtk:     number
-  boostSpa:     number
-  boostDef:     number
-  boostSpd:     number
-  boostSpe:     number
-  // attacker-only
-  isHelpingHand: boolean
-  isCrit:        boolean
-  isTailwind:    boolean
-  isBattery:     boolean
-  isPowerSpot:   boolean
-  // defender-only
-  isFriendGuard:    boolean
-  isReflect:        boolean
-  isLightScreen:    boolean
-  isAuroraVeil:     boolean
-  currentHpPercent: number
-}
 
 function makeSide(
   entry: ChampionsPokemonEntry | null,
@@ -122,33 +118,6 @@ function megaLabel(mega: MegaEvolution): string {
   return suffix ? `Mega ${suffix}` : 'Mega'
 }
 
-type KOColor = 'green' | 'yellow' | 'red'
-interface KOBadge { label: string; color: KOColor }
-
-function getKOBadge(ko: string): KOBadge {
-  const t = ko.toLowerCase()
-  if (t.includes('guaranteed') && t.includes('ohko'))
-    return { label: 'OHKO garantizado', color: 'green' }
-  if (t.includes('guaranteed') && t.includes('2hko'))
-    return { label: '2HKO garantizado', color: 'yellow' }
-  if (t.includes('ohko'))
-    return { label: 'OHKO posible', color: 'red' }
-  if (t.includes('2hko'))
-    return { label: '2HKO posible', color: 'red' }
-  return { label: 'No garantiza 2HKO', color: 'red' }
-}
-
-const KO_BADGE_CLS: Record<KOColor, string> = {
-  green:  'bg-green-500 text-white',
-  yellow: 'bg-champ-gold text-black',
-  red:    'bg-red-600 text-white',
-}
-const KO_BORDER_CLS: Record<KOColor, string> = {
-  green:  'border-green-500/50 bg-green-500/5',
-  yellow: 'border-champ-gold/50 bg-champ-gold/5',
-  red:    'border-red-500/30 bg-red-500/5',
-}
-
 function calcFinalSpe(
   baseSpe: number,
   nature: NatureName,
@@ -166,18 +135,15 @@ function calcFinalSpe(
   return status === 'par' ? Math.floor(withTailwind * 0.5) : withTailwind
 }
 
-function onlyNonZero(obj: Record<string, number>): Record<string, number> {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== 0))
-}
-
 // ── Small UI components ───────────────────────────────────────────────────────
 
-function Toggle({ label, value, onChange, gold = false }: {
-  label: string; value: boolean; onChange: (v: boolean) => void; gold?: boolean
+function Toggle({ label, value, onChange, gold = false, title }: {
+  label: string; value: boolean; onChange: (v: boolean) => void; gold?: boolean; title?: string
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={() => onChange(!value)}
       className={`${CHIP_BASE} px-2.5 py-1 ${value ? (gold ? GOLD_ON : CHIP_ON) : (gold ? GOLD_OFF : CHIP_OFF)}`}
     >
@@ -216,28 +182,88 @@ function BoostStepper({ label, value, onChange }: {
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface DamageCalcProps {
-  initialAttacker?:  ChampionsPokemonEntry | null
-  initialNature?:    NatureName
-  initialSpSpread?:  typeof EMPTY_SP_SPREAD
-  initialMega?:      MegaEvolution | null
+  initialAttacker?:         ChampionsPokemonEntry | null
+  initialNature?:           NatureName
+  initialSpSpread?:         typeof EMPTY_SP_SPREAD
+  initialMega?:             MegaEvolution | null
+  initialDefender?:         ChampionsPokemonEntry | null
+  initialDefenderNature?:   NatureName
+  initialDefenderSpSpread?: typeof EMPTY_SP_SPREAD
+  initialDefenderMega?:     MegaEvolution | null
+  initialMove?:             string
+  initialWeather?:          string
+  initialTerrain?:          string
+  initialGravity?:          boolean
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function DamageCalc({ initialAttacker, initialNature, initialSpSpread, initialMega }: DamageCalcProps = {}) {
+export default function DamageCalc({
+  initialAttacker, initialNature, initialSpSpread, initialMega,
+  initialDefender, initialDefenderNature, initialDefenderSpSpread, initialDefenderMega,
+  initialMove = '', initialWeather = '', initialTerrain = '', initialGravity = false,
+}: DamageCalcProps = {}) {
+  const pathname  = usePathname()
+  const isMounted = useRef(false)
+  const { t } = useLanguage()
+
   const [attacker, setAttacker] = useState<PokemonSide>(() =>
     makeSide(initialAttacker ?? ROSTER_BY_ID.get('garchomp') ?? null, initialNature ?? 'Jolly', initialSpSpread, initialMega)
   )
   const [defender, setDefender] = useState<PokemonSide>(() =>
-    makeSide(ROSTER_BY_ID.get('charizard') ?? null, 'Timid')
+    makeSide(
+      initialDefender ?? ROSTER_BY_ID.get('charizard') ?? null,
+      initialDefenderNature ?? 'Timid',
+      initialDefenderSpSpread,
+      initialDefenderMega,
+    )
   )
 
-  const [move,      setMove]      = useState('')
-  const [weather,   setWeather]   = useState('')
-  const [terrain,   setTerrain]   = useState('')
-  const [isGravity, setIsGravity] = useState(false)
+  const [move,      setMove]      = useState(initialMove)
+  const [weather,   setWeather]   = useState(initialWeather)
+  const [terrain,   setTerrain]   = useState(initialTerrain)
+  const [isGravity, setIsGravity] = useState(initialGravity)
+
+  useEffect(() => {
+    if (!isMounted.current) { isMounted.current = true; return }
+
+    const p = new URLSearchParams()
+
+    if (attacker.entry) p.set('atacante', attacker.entry.id)
+    if (attacker.nature !== 'Jolly') p.set('naturaleza', attacker.nature)
+    const a = attacker.spSpread
+    if (a.hp)  p.set('hp',  String(a.hp))
+    if (a.atk) p.set('atk', String(a.atk))
+    if (a.def) p.set('def', String(a.def))
+    if (a.spa) p.set('spa', String(a.spa))
+    if (a.spd) p.set('spd', String(a.spd))
+    if (a.spe) p.set('spe', String(a.spe))
+    if (attacker.selectedMega) p.set('mega', attacker.selectedMega.megaName)
+
+    if (defender.entry) p.set('def_pk', defender.entry.id)
+    if (defender.nature !== 'Timid') p.set('def_nat', defender.nature)
+    const d = defender.spSpread
+    if (d.hp)  p.set('def_hp',  String(d.hp))
+    if (d.atk) p.set('def_atk', String(d.atk))
+    if (d.def) p.set('def_def', String(d.def))
+    if (d.spa) p.set('def_spa', String(d.spa))
+    if (d.spd) p.set('def_spd', String(d.spd))
+    if (d.spe) p.set('def_spe', String(d.spe))
+    if (defender.selectedMega) p.set('def_mega', defender.selectedMega.megaName)
+
+    if (move)      p.set('mov',     move)
+    if (weather)   p.set('clima',   weather)
+    if (terrain)   p.set('terreno', terrain)
+    if (isGravity) p.set('grav',    '1')
+
+    const qs = p.toString()
+    window.history.replaceState(null, '', `${pathname}${qs ? `?${qs}` : ''}`)
+  }, [attacker, defender, move, weather, terrain, isGravity, pathname])
+
   const [result,    setResult]    = useState<DamageCalcResult | null>(null)
   const [error,     setError]     = useState<string | null>(null)
+  const [copied,    setCopied]    = useState(false)
+  const { spreads, save: saveSpread, remove: removeSpread } = useSavedSpreads()
 
   const { stats: atkBaseStats, loading: atkLoading } = usePokemonStats(attacker.entry?.pokeapiName ?? null)
   const { stats: defBaseStats, loading: defLoading } = usePokemonStats(defender.entry?.pokeapiName ?? null)
@@ -289,11 +315,11 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
   const handleCalc = () => {
     setError(null)
     if (!attacker.entry || !defender.entry) {
-      setError('Selecciona los Pokémon atacante y defensor.')
+      setError(t('calc.err.selectBoth'))
       return
     }
     if (!move.trim()) {
-      setError('Introduce el nombre de un movimiento.')
+      setError(t('calc.err.noMove'))
       return
     }
     try {
@@ -354,7 +380,7 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
       }
       setResult(runDamageCalc(input))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error desconocido en el cálculo.')
+      setError(e instanceof Error ? e.message : t('calc.err.unknown'))
     }
   }
 
@@ -363,9 +389,28 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
 
   return (
     <div className="space-y-6">
+      {/* ── Page header ── */}
+      <div>
+        <h1 className="font-display text-4xl font-bold text-white">{t('calc.title')}</h1>
+        <p className="text-champ-muted font-body text-sm mt-1">{t('calc.subtitle')}</p>
+      </div>
+
+      {/* ── Info strip ── */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-champ-muted font-body">
+        <span className="flex items-center gap-1.5">
+          <span className="text-champ-gold">◈</span> {t('calc.infoEngine')}
+        </span>
+        <span className="text-champ-border hidden sm:block">|</span>
+        <span>{t('calc.infoSP')}</span>
+        <span className="text-champ-border hidden sm:block">|</span>
+        <span className="flex items-center gap-1"><span className="text-champ-gold font-semibold">Mega</span> {t('calc.infoMega').replace('Mega ', '')}</span>
+        <span className="text-champ-border hidden sm:block">|</span>
+        <span>{t('calc.infoMoves')}</span>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <SideCard
-          label="Atacante" isAttacker
+          label={t('common.attacker')} isAttacker
           accentCls="text-red-400"
           side={attacker}
           displayStats={atkDisplayStats}
@@ -379,7 +424,7 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
         />
 
         <SideCard
-          label="Defensor"
+          label={t('common.defender')}
           accentCls="text-blue-400"
           side={defender}
           displayStats={defDisplayStats}
@@ -394,18 +439,17 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
       {/* ── Result ── */}
       {result && !error && koBadge && (
         <div className={`rounded-xl border-2 p-6 space-y-4 ${KO_BORDER_CLS[koBadge.color]}`}>
-          {/* Main numbers + badge */}
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div className="flex gap-8 flex-wrap">
               <div>
-                <p className="text-champ-muted text-xs font-body mb-1">Daño</p>
+                <p className="text-champ-muted text-xs font-body mb-1">{t('calc.dmgLabel')}</p>
                 <p className="text-white font-mono font-bold text-4xl leading-none">
                   {result.damage.min}–{result.damage.max}
                   <span className="text-champ-muted text-base font-body font-normal ml-1.5">HP</span>
                 </p>
               </div>
               <div>
-                <p className="text-champ-muted text-xs font-body mb-1">% Vida</p>
+                <p className="text-champ-muted text-xs font-body mb-1">{t('calc.hpLabel')}</p>
                 <p className="text-white font-mono font-bold text-4xl leading-none">
                   {result.percentMin}–{result.percentMax}
                   <span className="text-champ-muted text-base font-body font-normal ml-0.5">%</span>
@@ -413,7 +457,7 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
               </div>
               {defender.currentHpPercent < 100 && (
                 <div>
-                  <p className="text-champ-muted text-xs font-body mb-1">HP restante</p>
+                  <p className="text-champ-muted text-xs font-body mb-1">{t('calc.hpRemaining')}</p>
                   <p className="text-white font-mono font-bold text-4xl leading-none">
                     {Math.max(0, defenderCurHP - result.damage.max)}
                     <span className="text-champ-muted text-base font-body font-normal">/{result.defenderHP}</span>
@@ -426,27 +470,51 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
             </span>
           </div>
 
-          {/* Smogon description */}
-          <p className="text-champ-muted text-xs font-mono leading-relaxed break-words border-t border-champ-border/40 pt-4">
-            {result.description}
-          </p>
+          <div className="flex items-center gap-2 border-t border-champ-border/40 pt-4">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-body text-white ${TYPE_BG[result.moveType] ?? 'bg-champ-border'}`}>
+              {t('type.' + result.moveType.toLowerCase())}
+            </span>
+            <span className="text-[10px] font-body text-champ-muted px-2 py-0.5 rounded border border-champ-border">
+              {t('cat.' + result.moveCategory.toLowerCase())}
+            </span>
+            <p className="text-champ-muted text-xs font-mono leading-relaxed wrap-break-word flex-1">
+              {result.description}
+            </p>
+          </div>
 
-          {/* 16 rolls */}
-          <div>
-            <p className="text-champ-muted text-[10px] font-body uppercase tracking-widest mb-1.5">Rolls (16)</p>
-            <div className="flex flex-wrap gap-1">
-              {result.damage.rolls.map((dmg, i) => (
-                <span
-                  key={i}
-                  className={`text-xs font-mono rounded px-1.5 py-0.5 border ${
-                    dmg === result.damage.max ? 'bg-champ-blue/20 border-champ-blue/40 text-champ-blue' :
-                    dmg === result.damage.min ? 'bg-champ-border/60 text-champ-muted border-transparent' :
-                    'bg-champ-bg border-champ-border text-champ-muted'
-                  }`}
-                >
-                  {dmg}
-                </span>
-              ))}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-champ-muted text-[10px] font-body uppercase tracking-widest mb-1.5">{t('calc.rolls')}</p>
+              <div className="flex flex-wrap gap-1">
+                {result.damage.rolls.map((dmg, i) => (
+                  <span
+                    key={i}
+                    className={`text-xs font-mono rounded px-1.5 py-0.5 border ${
+                      dmg === result.damage.max ? 'bg-champ-blue/20 border-champ-blue/40 text-champ-blue' :
+                      dmg === result.damage.min ? 'bg-champ-border/60 text-champ-muted border-transparent' :
+                      'bg-champ-bg border-champ-border text-champ-muted'
+                    }`}
+                  >
+                    {dmg}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <SaveButton onSave={saveSpread} />
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  })
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-body text-xs transition-colors
+                  bg-champ-elevated border-champ-border text-champ-muted hover:text-white hover:border-champ-blue/50"
+              >
+                {copied ? t('calc.copied') : t('calc.copyLink')}
+              </button>
             </div>
           </div>
         </div>
@@ -459,7 +527,7 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
           onClick={handleSwap}
           className="shrink-0 flex items-center gap-2 px-4 py-2 bg-champ-elevated border border-champ-border rounded-lg text-sm text-champ-muted hover:text-white hover:border-champ-blue/50 font-body transition-colors"
         >
-          ⇄ Intercambiar
+          {t('calc.swap')}
         </button>
 
         {attacker.entry && defender.entry && (
@@ -477,7 +545,7 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
                   ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
                   : 'bg-champ-elevated border-champ-border text-champ-muted'
             }`}>
-              {atkSpe > defSpe ? 'va primero' : atkSpe < defSpe ? 'va segundo' : 'empate'}
+              {atkSpe > defSpe ? t('calc.goesFirst') : atkSpe < defSpe ? t('calc.goesSecond') : t('calc.tie')}
             </span>
             <div className="text-sm font-body text-right">
               <span className="text-blue-400 font-bold">{defender.entry.displayName}</span>
@@ -491,31 +559,31 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
 
       {/* ── Field conditions ── */}
       <div className="bg-champ-surface border border-champ-border rounded-xl p-5">
-        <h2 className="font-display text-base font-bold text-white mb-3">Condiciones de campo</h2>
+        <h2 className="font-display text-base font-bold text-white mb-3">{t('calc.fieldConds')}</h2>
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
-            <label className="text-xs text-champ-muted font-body block mb-1">Clima</label>
+            <label className="text-xs text-champ-muted font-body block mb-1">{t('common.weather')}</label>
             <select value={weather} onChange={e => setWeather(e.target.value)} className={INPUT_CLS}>
-              <option value="">Ninguno</option>
-              <option value="Sun">Sol</option>
-              <option value="Rain">Lluvia</option>
-              <option value="Sand">Arena</option>
-              <option value="Snow">Nieve</option>
+              <option value="">{t('common.none')}</option>
+              <option value="Sun">{t('weather.sun')}</option>
+              <option value="Rain">{t('weather.rain')}</option>
+              <option value="Sand">{t('weather.sand')}</option>
+              <option value="Snow">{t('weather.snow')}</option>
             </select>
           </div>
           <div>
-            <label className="text-xs text-champ-muted font-body block mb-1">Terreno</label>
+            <label className="text-xs text-champ-muted font-body block mb-1">{t('common.terrain')}</label>
             <select value={terrain} onChange={e => setTerrain(e.target.value)} className={INPUT_CLS}>
-              <option value="">Ninguno</option>
-              <option value="Electric">Eléctrico</option>
-              <option value="Grassy">Planta</option>
-              <option value="Misty">Niebla</option>
-              <option value="Psychic">Psíquico</option>
+              <option value="">{t('common.none')}</option>
+              <option value="Electric">{t('terrain.electric')}</option>
+              <option value="Grassy">{t('terrain.grassy')}</option>
+              <option value="Misty">{t('terrain.misty')}</option>
+              <option value="Psychic">{t('terrain.psychic')}</option>
             </select>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Toggle label="Gravedad" value={isGravity} onChange={setIsGravity} />
+          <Toggle label={t('calc.gravity')} value={isGravity} onChange={setIsGravity} title="Gravity: prohíbe movimientos voladores y aumenta precisión. Afecta a ambos lados." />
         </div>
       </div>
 
@@ -525,16 +593,29 @@ export default function DamageCalc({ initialAttacker, initialNature, initialSpSp
         disabled={isLoadingStats}
         className="w-full py-3 bg-champ-blue hover:bg-champ-blue-glow text-white font-display text-lg font-bold rounded-xl transition-colors shadow-lg shadow-champ-blue/25 disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        {isLoadingStats ? 'Cargando stats...' : 'Calcular Daño'}
+        {isLoadingStats ? t('calc.loadingStats') : t('calc.calculate')}
       </button>
 
       {/* ── Error ── */}
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-          <p className="text-red-400 font-body text-sm">{error}</p>
-        </div>
+      {error && <ErrorToast message={error} onDismiss={() => setError(null)} />}
+
+      {/* ── Spread comparator ── */}
+      {result && !error && attacker.entry && defender.entry && (
+        <SpreadComparator
+          result={result}
+          attacker={attacker}
+          defender={defender}
+          move={move}
+          weather={weather}
+          terrain={terrain}
+          isGravity={isGravity}
+          atkBaseStats={atkDisplayStats}
+          defBaseStats={defDisplayStats}
+        />
       )}
 
+      {/* ── Spreads guardados ── */}
+      <SavedSpreads spreads={spreads} onRemove={removeSpread} />
     </div>
   )
 }
@@ -562,44 +643,68 @@ function SideCard({
   onEntryChange, onMegaSelect, onUpdate,
   move = '', onMoveChange,
 }: SideCardProps) {
+  const { t, lang } = useLanguage()
   const topMoves = meta?.top_moves?.slice(0, 8)    ?? []
   const topAb    = meta?.top_abilities?.slice(0, 3) ?? []
   const topItems = meta?.top_items?.slice(0, 4)    ?? []
+
+  const [abES,   setAbES]   = useState<Record<string, string>>({})
+  const [itemES, setItemES] = useState<Record<string, string>>({})
+  const [moveES, setMoveES] = useState<Record<string, string>>({})
+
+  const abKey   = topAb.map(a => a.name).join(',')
+  const itemKey = topItems.map(i => i.name).join(',')
+  const moveKey = topMoves.map(m => m.name).join(',')
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    topAb.forEach(a => fetchAbilityES(a.name).then(es => { if (es) setAbES(p => ({ ...p, [a.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, abKey])
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    topItems.forEach(it => fetchItemES(it.name).then(es => { if (es) setItemES(p => ({ ...p, [it.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, itemKey])
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    topMoves.forEach(m => fetchMoveNameES(m.name).then(es => { if (es) setMoveES(p => ({ ...p, [m.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, moveKey])
 
   return (
     <div className="bg-champ-surface border border-champ-border rounded-xl p-5 space-y-4">
       <h2 className={`font-display text-lg font-bold ${accentCls}`}>{label}</h2>
 
-      {/* Pokémon picker */}
       <PokemonPicker value={side.entry} onChange={onEntryChange} label="Pokémon" />
 
-      {/* Nature + Ability */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-champ-muted font-body block mb-1">Naturaleza</label>
+          <label className="text-xs text-champ-muted font-body block mb-1">{t('common.nature')}</label>
           <select
             value={side.nature}
             onChange={e => onUpdate({ nature: e.target.value as NatureName })}
             className={INPUT_CLS}
           >
-            {NATURES.map(n => <option key={n} value={n}>{n}</option>)}
+            {NATURES.map(n => <option key={n} value={n}>{natureLabel(n, lang)}</option>)}
           </select>
         </div>
 
         <div>
-          <label className="text-xs text-champ-muted font-body block mb-1">Habilidad</label>
-          <input
+          <label className="text-xs text-champ-muted font-body block mb-1">{t('common.ability')}</label>
+          <AbilityInput
             value={side.ability}
-            onChange={e => onUpdate({ ability: e.target.value })}
-            placeholder="ej. Rough Skin"
-            className={INPUT_CLS}
+            onChange={v => onUpdate({ ability: v })}
+            pokeapiName={side.entry?.pokeapiName}
           />
           {topAb.length > 0 && (
             <div className="flex gap-1 mt-1.5 flex-wrap">
               {topAb.map(a => (
                 <button key={a.name} type="button" onClick={() => onUpdate({ ability: a.name })}
                   className={`${CHIP_BASE} ${side.ability === a.name ? CHIP_ON : CHIP_OFF}`}>
-                  {a.name}
+                  {lang === 'es' ? (abES[a.name] ?? a.name) : a.name}
                 </button>
               ))}
             </div>
@@ -607,35 +712,28 @@ function SideCard({
         </div>
       </div>
 
-      {/* Item */}
       <div>
-        <label className="text-xs text-champ-muted font-body block mb-1">Objeto</label>
-        <input
-          value={side.item}
-          onChange={e => onUpdate({ item: e.target.value })}
-          placeholder="ej. Life Orb"
-          className={INPUT_CLS}
-        />
+        <label className="text-xs text-champ-muted font-body block mb-1">{t('common.item')}</label>
+        <ItemInput value={side.item} onChange={v => onUpdate({ item: v })} />
         {topItems.length > 0 && (
           <div className="flex gap-1 mt-1.5 flex-wrap">
             {topItems.map(it => (
               <button key={it.name} type="button" onClick={() => onUpdate({ item: it.name })}
                 className={`${CHIP_BASE} ${side.item === it.name ? CHIP_ON : CHIP_OFF}`}>
-                {it.name}
+                {lang === 'es' ? (itemES[it.name] ?? it.name) : it.name}
               </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Mega selector */}
       {megas.length > 0 && (
         <div>
-          <label className="text-xs text-champ-muted font-body block mb-1">Forma · Omni Ring</label>
+          <label className="text-xs text-champ-muted font-body block mb-1">{t('calc.form')}</label>
           <div className="flex gap-1.5 flex-wrap">
             <button type="button" onClick={() => onMegaSelect(null)}
               className={`${CHIP_BASE} px-3 py-1 ${!side.selectedMega ? CHIP_ON : CHIP_OFF}`}>
-              Base
+              {t('common.base')}
             </button>
             {megas.map(mega => (
               <button key={mega.megaName} type="button" onClick={() => onMegaSelect(mega)}
@@ -646,28 +744,27 @@ function SideCard({
           </div>
           {side.selectedMega && (
             <p className="text-xs text-champ-muted font-body mt-1">
-              Habilidad: <span className="text-champ-gold">{side.selectedMega.megaAbility}</span>
+              {t('calc.ability')}<span className="text-champ-gold">{side.selectedMega.megaAbility}</span>
             </p>
           )}
         </div>
       )}
 
-      {/* Move picker — attacker only */}
       {isAttacker && onMoveChange && (
         <div>
-          <label className="text-xs text-champ-muted font-body block mb-1">Movimiento</label>
-          <input
+          <label className="text-xs text-champ-muted font-body block mb-1">{t('common.move')}</label>
+          <MoveInput
             value={move}
-            onChange={e => onMoveChange(e.target.value)}
-            placeholder="ej. Earthquake"
-            className={INPUT_CLS}
+            onChange={onMoveChange}
+            pokeapiName={side.entry?.pokeapiName}
+            placeholder={lang === 'es' ? 'ej. Terremoto' : 'e.g. Earthquake'}
           />
           {topMoves.length > 0 && (
             <div className="flex gap-1 mt-1.5 flex-wrap">
               {topMoves.map(m => (
                 <button key={m.name} type="button" onClick={() => onMoveChange(m.name)}
                   className={`${CHIP_BASE} ${move === m.name ? CHIP_ON : CHIP_OFF}`}>
-                  {m.name}
+                  {lang === 'es' ? (moveES[m.name] ?? m.name) : m.name}
                   <span className="ml-1 opacity-50">{(m.usage * 100).toFixed(0)}%</span>
                 </button>
               ))}
@@ -679,26 +776,26 @@ function SideCard({
       {/* ── Battle modifiers ── */}
       <div className="border-t border-champ-border/50 pt-3 space-y-2.5">
         <p className="text-[10px] font-bold text-champ-muted uppercase tracking-widest font-body">
-          Condiciones de batalla
+          {t('calc.battleConds')}
         </p>
 
         {isAttacker ? (
           <>
             <div className="flex flex-wrap gap-1.5">
-              <Toggle label="Ayuda Extra"   value={side.isHelpingHand} onChange={v => onUpdate({ isHelpingHand: v })} />
-              <Toggle label="Golpe Crítico" value={side.isCrit}        onChange={v => onUpdate({ isCrit: v })} />
-              <Toggle label="Viento Cola"   value={side.isTailwind}    onChange={v => onUpdate({ isTailwind: v })} />
-              <Toggle label="Batería"       value={side.isBattery}     onChange={v => onUpdate({ isBattery: v })} />
-              <Toggle label="Zona de Poder" value={side.isPowerSpot}   onChange={v => onUpdate({ isPowerSpot: v })} />
+              <Toggle label={t('calc.helpingHand')}   value={side.isHelpingHand} onChange={v => onUpdate({ isHelpingHand: v })} />
+              <Toggle label={t('calc.critHit')} value={side.isCrit}        onChange={v => onUpdate({ isCrit: v })} />
+              <Toggle label={t('calc.tailwind')}   value={side.isTailwind}    onChange={v => onUpdate({ isTailwind: v })} />
+              <Toggle label={t('calc.battery')}       value={side.isBattery}     onChange={v => onUpdate({ isBattery: v })} />
+              <Toggle label={t('calc.powerSpot')} value={side.isPowerSpot}   onChange={v => onUpdate({ isPowerSpot: v })} />
               <select
                 value={side.status}
                 onChange={e => onUpdate({ status: e.target.value as PokemonStatus })}
                 className="text-xs bg-champ-elevated border border-champ-border rounded px-2 py-0.5 text-champ-muted font-body focus:outline-none focus:border-champ-blue"
               >
-                <option value="">Sano</option>
-                <option value="brn">Quemado (Atk×½)</option>
-                <option value="par">Paralizado</option>
-                <option value="psn">Envenenado</option>
+                <option value="">{t('calc.status.healthy')}</option>
+                <option value="brn">{t('calc.status.burned')}</option>
+                <option value="par">{t('calc.status.paralyzed')}</option>
+                <option value="psn">{t('calc.status.poisoned')}</option>
               </select>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -712,11 +809,11 @@ function SideCard({
         ) : (
           <>
             <div className="flex flex-wrap gap-1.5">
-              <Toggle label="Guardia Amigo" value={side.isFriendGuard} onChange={v => onUpdate({ isFriendGuard: v })} />
-              <Toggle label="Viento Cola"   value={side.isTailwind}    onChange={v => onUpdate({ isTailwind: v })} />
-              <Toggle label="Reflejo"       value={side.isReflect}     onChange={v => onUpdate({ isReflect: v })} />
-              <Toggle label="Pantalla Luz"  value={side.isLightScreen} onChange={v => onUpdate({ isLightScreen: v })} />
-              <Toggle label="Velo Aurora"   value={side.isAuroraVeil}  onChange={v => onUpdate({ isAuroraVeil: v })} />
+              <Toggle label={t('calc.friendGuard')} value={side.isFriendGuard} onChange={v => onUpdate({ isFriendGuard: v })} />
+              <Toggle label={t('calc.tailwind')}   value={side.isTailwind}    onChange={v => onUpdate({ isTailwind: v })} />
+              <Toggle label={t('calc.reflect')}       value={side.isReflect}     onChange={v => onUpdate({ isReflect: v })} />
+              <Toggle label={t('calc.lightScreen')}  value={side.isLightScreen} onChange={v => onUpdate({ isLightScreen: v })} />
+              <Toggle label={t('calc.auroraVeil')}   value={side.isAuroraVeil}  onChange={v => onUpdate({ isAuroraVeil: v })} />
             </div>
             <div className="flex flex-wrap gap-3">
               <BoostStepper label="Def" value={side.boostDef} onChange={v => onUpdate({ boostDef: v })} />
@@ -726,10 +823,9 @@ function SideCard({
               <BoostStepper label="Spe" value={side.boostSpe} onChange={v => onUpdate({ boostSpe: v })} />
             </div>
 
-            {/* HP actual */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-bold text-champ-muted uppercase tracking-widest font-body">HP actual</span>
+                <span className="text-[10px] font-bold text-champ-muted uppercase tracking-widest font-body">{t('calc.currentHP')}</span>
                 <span className={`text-xs font-mono font-bold ${side.currentHpPercent < 50 ? 'text-red-400' : side.currentHpPercent < 75 ? 'text-champ-gold' : 'text-champ-muted'}`}>
                   {side.currentHpPercent}%
                 </span>
@@ -747,7 +843,6 @@ function SideCard({
         )}
       </div>
 
-      {/* SP Sliders */}
       <SPSlider
         key={`${side.entry?.id ?? 'empty'}-${side.selectedMega?.megaName ?? 'base'}`}
         baseStats={displayStats}

@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { NatureName, SPSpread } from '@/types/champions'
 import { EMPTY_SP_SPREAD } from '@/types/champions'
 import { getPokemonMeta } from '@/lib/champions-meta'
 import { getMegas } from '@/data/mega-stones'
+import { ROSTER_BY_ID } from '@/data/regulation-mb'
 import type { ChampionsPokemonEntry } from '@/data/regulation-mb'
 import type { MegaEvolution } from '@/types/champions'
 import type { BaseStats } from '@/types/pokemon'
@@ -13,8 +15,17 @@ import { calcFinalStat, getNatureMods } from '@/lib/sp-utils'
 import { getBaseStats } from '@/lib/base-stats'
 import PokemonPicker from '@/components/calculator/PokemonPicker'
 import SPSlider from '@/components/calculator/SPSlider'
+import MoveInput from '@/components/optimizer/MoveInput'
+import AbilityInput from '@/components/team/AbilityInput'
+import ItemInput from '@/components/team/ItemInput'
 import { optimizeSurvive, optimizeKO, optimizeSpeedTier } from '@/lib/sp-optimizer'
 import type { OptimizeResult } from '@/lib/sp-optimizer'
+import { useLanguage } from '@/contexts/LanguageContext'
+import { natureLabel } from '@/lib/nature-names'
+import { fetchAbilityES } from '@/lib/ability-names'
+import { fetchItemES } from '@/lib/item-names'
+import { fetchMoveNameES } from '@/lib/move-names'
+import ErrorToast from '@/components/ui/ErrorToast'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,13 +39,6 @@ const NATURES: NatureName[] = [
 const DEFAULT_STATS: BaseStats = { hp: 100, atk: 100, def: 100, spa: 100, spd: 100, spe: 100 }
 
 type Goal = 'survive' | 'ohko' | '2hko' | 'speed_tier'
-
-const GOALS: { id: Goal; label: string; desc: string }[] = [
-  { id: 'survive',    label: 'Aguantar golpe',    desc: 'Mínimo HP/Def/SpD para sobrevivir el peor caso' },
-  { id: 'ohko',       label: 'Garantizar OHKO',   desc: 'Mínimo Atk/SpA para hacer OHKO siempre' },
-  { id: '2hko',       label: 'Garantizar 2HKO',   desc: 'Mínimo Atk/SpA para hacer 2HKO siempre' },
-  { id: 'speed_tier', label: 'Alcanzar speed tier', desc: 'Mínimo Spe para superar a un rival' },
-]
 
 const STAT_META: { key: keyof SPSpread; label: string; color: string }[] = [
   { key: 'hp',  label: 'HP',  color: 'bg-champ-success' },
@@ -51,21 +55,6 @@ const STATS_OPTIMIZED: Record<Goal, (keyof SPSpread)[]> = {
   '2hko':     ['atk', 'spa'],
   speed_tier: ['spe'],
 }
-
-const WEATHERS = [
-  { value: '',     label: 'Ninguno' },
-  { value: 'Sun',  label: 'Sol' },
-  { value: 'Rain', label: 'Lluvia' },
-  { value: 'Sand', label: 'Arena' },
-  { value: 'Snow', label: 'Nieve' },
-]
-const TERRAINS = [
-  { value: '',          label: 'Ninguno' },
-  { value: 'Electric',  label: 'Eléctrico' },
-  { value: 'Grassy',    label: 'Herboso' },
-  { value: 'Misty',     label: 'Neblinoso' },
-  { value: 'Psychic',   label: 'Psíquico' },
-]
 
 const INPUT_CLS = 'w-full bg-champ-elevated border border-champ-border rounded-lg px-3 py-2 text-sm text-white placeholder-champ-muted font-body focus:outline-none focus:border-champ-blue transition-colors'
 const CHIP_BASE = 'text-xs px-2 py-0.5 rounded border font-body transition-colors cursor-pointer'
@@ -145,44 +134,67 @@ function StatBar({ label, sp, finalStat, color, highlight }: {
 }
 
 function NatureSelect({ value, onChange }: { value: NatureName; onChange: (n: NatureName) => void }) {
+  const { lang } = useLanguage()
   return (
     <select value={value} onChange={e => onChange(e.target.value as NatureName)} className={INPUT_CLS}>
-      {NATURES.map(n => <option key={n} value={n}>{n}</option>)}
+      {NATURES.map(n => <option key={n} value={n}>{natureLabel(n, lang)}</option>)}
     </select>
   )
 }
 
-function AbilityItemInputs({ ability, item, onAbility, onItem, meta }: {
+function AbilityItemInputs({ ability, item, onAbility, onItem, meta, pokeapiName }: {
   ability: string; item: string
   onAbility: (v: string) => void; onItem: (v: string) => void
   meta: ReturnType<typeof getPokemonMeta>
+  pokeapiName?: string | null
 }) {
+  const { t, lang } = useLanguage()
   const topAb    = meta?.top_abilities?.slice(0, 3) ?? []
   const topItems = meta?.top_items?.slice(0, 3)    ?? []
+  const [abES,   setAbES]   = useState<Record<string, string>>({})
+  const [itemES, setItemES] = useState<Record<string, string>>({})
+
+  const abKey   = topAb.map(a => a.name).join(',')
+  const itemKey = topItems.map(i => i.name).join(',')
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    topAb.forEach(a => fetchAbilityES(a.name).then(es => { if (es) setAbES(p => ({ ...p, [a.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, abKey])
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    topItems.forEach(it => fetchItemES(it.name).then(es => { if (es) setItemES(p => ({ ...p, [it.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, itemKey])
+
   return (
     <div className="grid grid-cols-2 gap-3">
       <div>
-        <label className="text-xs text-champ-muted font-body block mb-1">Habilidad</label>
-        <input value={ability} onChange={e => onAbility(e.target.value)}
-          placeholder="ej. Intimidate" className={INPUT_CLS} />
+        <label className="text-xs text-champ-muted font-body block mb-1">{t('common.ability')}</label>
+        <AbilityInput value={ability} onChange={onAbility} pokeapiName={pokeapiName} />
         {topAb.length > 0 && (
           <div className="flex gap-1 mt-1.5 flex-wrap">
             {topAb.map(a => (
               <button key={a.name} type="button" onClick={() => onAbility(a.name)}
-                className={`${CHIP_BASE} ${ability === a.name ? CHIP_ON : CHIP_OFF}`}>{a.name}</button>
+                className={`${CHIP_BASE} ${ability === a.name ? CHIP_ON : CHIP_OFF}`}>
+                {lang === 'es' ? (abES[a.name] ?? a.name) : a.name}
+              </button>
             ))}
           </div>
         )}
       </div>
       <div>
-        <label className="text-xs text-champ-muted font-body block mb-1">Objeto</label>
-        <input value={item} onChange={e => onItem(e.target.value)}
-          placeholder="ej. Assault Vest" className={INPUT_CLS} />
+        <label className="text-xs text-champ-muted font-body block mb-1">{t('common.item')}</label>
+        <ItemInput value={item} onChange={onItem} />
         {topItems.length > 0 && (
           <div className="flex gap-1 mt-1.5 flex-wrap">
             {topItems.map(it => (
               <button key={it.name} type="button" onClick={() => onItem(it.name)}
-                className={`${CHIP_BASE} ${item === it.name ? CHIP_ON : CHIP_OFF}`}>{it.name}</button>
+                className={`${CHIP_BASE} ${item === it.name ? CHIP_ON : CHIP_OFF}`}>
+                {lang === 'es' ? (itemES[it.name] ?? it.name) : it.name}
+              </button>
             ))}
           </div>
         )}
@@ -195,18 +207,33 @@ function FieldConditions({ weather, terrain, onWeather, onTerrain }: {
   weather: string; terrain: string
   onWeather: (v: string) => void; onTerrain: (v: string) => void
 }) {
+  const { t } = useLanguage()
+  const WEATHERS = [
+    { value: '',     label: t('common.none') },
+    { value: 'Sun',  label: t('weather.sun') },
+    { value: 'Rain', label: t('weather.rain') },
+    { value: 'Sand', label: t('weather.sand') },
+    { value: 'Snow', label: t('weather.snow') },
+  ]
+  const TERRAINS = [
+    { value: '',          label: t('common.none') },
+    { value: 'Electric',  label: t('terrain.electric') },
+    { value: 'Grassy',    label: t('terrain.grassy') },
+    { value: 'Misty',     label: t('terrain.misty') },
+    { value: 'Psychic',   label: t('terrain.psychic') },
+  ]
   return (
     <div className="grid grid-cols-2 gap-3">
       <div>
-        <label className="text-xs text-champ-muted font-body block mb-1">Clima</label>
+        <label className="text-xs text-champ-muted font-body block mb-1">{t('common.weather')}</label>
         <select value={weather} onChange={e => onWeather(e.target.value)} className={INPUT_CLS}>
           {WEATHERS.map(w => <option key={w.value} value={w.value}>{w.label}</option>)}
         </select>
       </div>
       <div>
-        <label className="text-xs text-champ-muted font-body block mb-1">Terreno</label>
+        <label className="text-xs text-champ-muted font-body block mb-1">{t('common.terrain')}</label>
         <select value={terrain} onChange={e => onTerrain(e.target.value)} className={INPUT_CLS}>
-          {TERRAINS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          {TERRAINS.map(tt => <option key={tt.value} value={tt.value}>{tt.label}</option>)}
         </select>
       </div>
     </div>
@@ -233,24 +260,46 @@ function BoostStepper({ label, value, onChange }: { label: string; value: number
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function SPOptimizer() {
+  const params = useSearchParams()
+  const { t, lang } = useLanguage()
+
+  const GOALS = [
+    { id: 'survive' as Goal,    label: t('opt.survive.label'), desc: t('opt.survive.desc') },
+    { id: 'ohko' as Goal,       label: t('opt.ohko.label'),    desc: t('opt.ohko.desc') },
+    { id: '2hko' as Goal,       label: t('opt.2hko.label'),    desc: t('opt.2hko.desc') },
+    { id: 'speed_tier' as Goal, label: t('opt.speed.label'),   desc: t('opt.speed.desc') },
+  ]
+
   // ── My Pokemon
-  const [myEntry,   setMyEntry]   = useState<ChampionsPokemonEntry | null>(null)
-  const [myNature,  setMyNature]  = useState<NatureName>('Jolly')
+  const [myEntry,   setMyEntry]   = useState<ChampionsPokemonEntry | null>(() => {
+    const pk = params.get('pk')
+    return pk ? (ROSTER_BY_ID.get(pk) ?? null) : null
+  })
+  const [myNature,  setMyNature]  = useState<NatureName>(() => {
+    const n = params.get('nat') as NatureName
+    return NATURES.includes(n) ? n : 'Jolly'
+  })
   const [myAbility, setMyAbility] = useState('')
   const [myItem,    setMyItem]    = useState('')
   const [myMega,    setMyMega]    = useState<MegaEvolution | null>(null)
 
   // ── Goal
-  const [goal, setGoal] = useState<Goal>('survive')
+  const [goal, setGoal] = useState<Goal>(() => {
+    const g = params.get('goal')
+    return (g === 'ohko' || g === '2hko' || g === 'speed_tier') ? g : 'survive'
+  })
 
   // ── Survive form (attacker config)
-  const [atkEntry,    setAtkEntry]    = useState<ChampionsPokemonEntry | null>(null)
+  const [atkEntry,    setAtkEntry]    = useState<ChampionsPokemonEntry | null>(() => {
+    const id = params.get('atk')
+    return id ? (ROSTER_BY_ID.get(id) ?? null) : null
+  })
   const [atkMega,     setAtkMega]     = useState<MegaEvolution | null>(null)
   const [atkNature,   setAtkNature]   = useState<NatureName>('Timid')
   const [atkAbility,  setAtkAbility]  = useState('')
   const [atkItem,     setAtkItem]     = useState('')
   const [atkSpSpread, setAtkSpSpread] = useState<SPSpread>({ ...EMPTY_SP_SPREAD })
-  const [moveName,    setMoveName]    = useState('')
+  const [moveName,    setMoveName]    = useState(() => params.get('mov') ?? '')
 
   // ── Survive extras
   const [surviveCrit,    setSurviveCrit]    = useState(false)
@@ -260,14 +309,17 @@ export default function SPOptimizer() {
   const [surviveTerrain, setSurviveTerrain] = useState('')
 
   // ── KO form (defender config)
-  const [defEntry,    setDefEntry]    = useState<ChampionsPokemonEntry | null>(null)
+  const [defEntry,    setDefEntry]    = useState<ChampionsPokemonEntry | null>(() => {
+    const id = params.get('def')
+    return id ? (ROSTER_BY_ID.get(id) ?? null) : null
+  })
   const [defMega,     setDefMega]     = useState<MegaEvolution | null>(null)
   const [defNature,   setDefNature]   = useState<NatureName>('Bold')
   const [defAbility,  setDefAbility]  = useState('')
   const [defItem,     setDefItem]     = useState('')
   const [defSpSpread, setDefSpSpread] = useState<SPSpread>({ ...EMPTY_SP_SPREAD })
   const [statToOpt,   setStatToOpt]   = useState<'atk' | 'spa'>('atk')
-  const [koMove,      setKoMove]      = useState('')
+  const [koMove,      setKoMove]      = useState(() => params.get('komov') ?? '')
 
   // ── KO extras
   const [myBoost,   setMyBoost]   = useState(0)
@@ -275,7 +327,10 @@ export default function SPOptimizer() {
   const [koTerrain, setKoTerrain] = useState('')
 
   // ── Speed tier form
-  const [rivalEntry,    setRivalEntry]    = useState<ChampionsPokemonEntry | null>(null)
+  const [rivalEntry,    setRivalEntry]    = useState<ChampionsPokemonEntry | null>(() => {
+    const id = params.get('rival')
+    return id ? (ROSTER_BY_ID.get(id) ?? null) : null
+  })
   const [rivalNature,   setRivalNature]   = useState<NatureName>('Timid')
   const [rivalSpSpe,    setRivalSpSpe]    = useState(0)
   const [myTailwind,    setMyTailwind]    = useState(false)
@@ -285,6 +340,12 @@ export default function SPOptimizer() {
   const [result,    setResult]    = useState<OptimizeResult | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [calcError, setCalcError] = useState<string | null>(null)
+
+  // ── ES translations for "Mi Pokémon" ability/item chips and move chips
+  const [myAbES,      setMyAbES]      = useState<Record<string, string>>({})
+  const [myItemES,    setMyItemES]    = useState<Record<string, string>>({})
+  const [atkMoveES,   setAtkMoveES]   = useState<Record<string, string>>({})
+  const [myMoveES,    setMyMoveES]    = useState<Record<string, string>>({})
 
   // ── Base stats via PokeAPI
   const { stats: myBaseStats,    loading: myLoading }    = usePokemonStats(myEntry?.pokeapiName    ?? null)
@@ -308,6 +369,52 @@ export default function SPOptimizer() {
   const rivalFinalSpe = rivalBaseStats.spe > 0
     ? calcFinalStat('spe', rivalBaseStats.spe, rivalSpSpe, rivalMods.spe) * (rivalTailwind ? 2 : 1)
     : 0
+
+  // ── ES name fetching for chips
+  const myAbKey   = myMeta?.top_abilities?.map(a => a.name).join(',') ?? ''
+  const myItemKey = myMeta?.top_items?.map(i => i.name).join(',') ?? ''
+  const atkMoveKey = atkMeta?.top_moves?.map(m => m.name).join(',') ?? ''
+  const myMoveKey  = myMeta?.top_moves?.map(m => m.name).join(',') ?? ''
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    myMeta?.top_abilities?.slice(0, 3).forEach(a => fetchAbilityES(a.name).then(es => { if (es) setMyAbES(p => ({ ...p, [a.name]: es })) }))
+    myMeta?.top_items?.slice(0, 4).forEach(it => fetchItemES(it.name).then(es => { if (es) setMyItemES(p => ({ ...p, [it.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, myAbKey, myItemKey])
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    atkMeta?.top_moves?.slice(0, 6).forEach(m => fetchMoveNameES(m.name).then(es => { if (es) setAtkMoveES(p => ({ ...p, [m.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, atkMoveKey])
+
+  useEffect(() => {
+    if (lang !== 'es') return
+    myMeta?.top_moves?.slice(0, 6).forEach(m => fetchMoveNameES(m.name).then(es => { if (es) setMyMoveES(p => ({ ...p, [m.name]: es })) }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang, myMoveKey])
+
+  // ── URL persistence
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return }
+    const p = new URLSearchParams()
+    if (goal !== 'survive') p.set('goal', goal)
+    if (myEntry) p.set('pk', myEntry.id)
+    if (myNature !== 'Jolly') p.set('nat', myNature)
+    if (goal === 'survive') {
+      if (atkEntry) p.set('atk', atkEntry.id)
+      if (moveName.trim()) p.set('mov', moveName.trim())
+    } else if (goal === 'ohko' || goal === '2hko') {
+      if (defEntry) p.set('def', defEntry.id)
+      if (koMove.trim()) p.set('komov', koMove.trim())
+    } else if (goal === 'speed_tier') {
+      if (rivalEntry) p.set('rival', rivalEntry.id)
+    }
+    const qs = p.toString()
+    window.history.replaceState(null, '', `/optimizador${qs ? `?${qs}` : ''}`)
+  }, [goal, myEntry, myNature, atkEntry, moveName, defEntry, koMove, rivalEntry])
 
   // ── Handlers
   const handleMyEntry = (entry: ChampionsPokemonEntry) => {
@@ -356,14 +463,14 @@ export default function SPOptimizer() {
   const handleOptimize = async () => {
     setCalcError(null)
     setResult(null)
-    if (!myEntry) { setCalcError('Selecciona el Pokémon a optimizar.'); return }
+    if (!myEntry) { setCalcError(t('opt.err.selectMon')); return }
     setIsRunning(true)
     await new Promise(r => setTimeout(r, 0))
 
     try {
       let res: OptimizeResult
       if (goal === 'survive') {
-        if (!atkEntry || !moveName.trim()) throw new Error('Selecciona el atacante y el movimiento.')
+        if (!atkEntry || !moveName.trim()) throw new Error(t('opt.err.selectAtkMove'))
         res = optimizeSurvive({
           defPokeapiName: myEntry.pokeapiName, defNature: myNature,
           defAbility: myAbility || undefined, defItem: myItem || undefined,
@@ -380,7 +487,7 @@ export default function SPOptimizer() {
           atkBoost: atkBoost || undefined,
         })
       } else if (goal === 'ohko' || goal === '2hko') {
-        if (!defEntry || !koMove.trim()) throw new Error('Selecciona el defensor y el movimiento.')
+        if (!defEntry || !koMove.trim()) throw new Error(t('opt.err.selectDefMove'))
         res = optimizeKO({
           atkPokeapiName: myEntry.pokeapiName, atkNature: myNature,
           atkAbility: myAbility || undefined, atkItem: myItem || undefined,
@@ -395,12 +502,12 @@ export default function SPOptimizer() {
           myBoost: myBoost || undefined,
         })
       } else {
-        if (!rivalEntry) throw new Error('Selecciona el Pokémon rival.')
+        if (!rivalEntry) throw new Error(t('opt.err.selectRival'))
         res = optimizeSpeedTier({ baseSpe: myDisplayStats.spe, nature: myNature, rivalFinalSpe, myTailwind })
       }
       setResult(res)
     } catch (e) {
-      setCalcError(e instanceof Error ? e.message : 'Error en el cálculo.')
+      setCalcError(e instanceof Error ? e.message : t('opt.err.calc'))
     } finally {
       setIsRunning(false)
     }
@@ -408,10 +515,35 @@ export default function SPOptimizer() {
 
   const finalStats = result ? computeFinalStats(myDisplayStats, myNature, result.spSpread) : null
   const optimized  = result ? STATS_OPTIMIZED[goal] : []
-  const calcUrl    = (result && myEntry) ? (() => {
+  const calcUrl = (result?.success && myEntry) ? (() => {
     const s = result.spSpread
-    const base = `/calculator?atacante=${myEntry.id}&naturaleza=${myNature}&hp=${s.hp}&atk=${s.atk}&def=${s.def}&spa=${s.spa}&spd=${s.spd}&spe=${s.spe}`
-    return myMega ? `${base}&mega=${myMega.megaName}` : base
+    const p = new URLSearchParams()
+
+    if (goal === 'survive') {
+      if (atkEntry) { p.set('atacante', atkEntry.id); if (atkMega) p.set('mega', atkMega.megaName) }
+      p.set('def_pk', myEntry.id)
+      if (myMega) p.set('def_mega', myMega.megaName)
+      if (myNature !== 'Timid') p.set('def_nat', myNature)
+      if (s.hp)  p.set('def_hp',  String(s.hp))
+      if (s.def) p.set('def_def', String(s.def))
+      if (s.spd) p.set('def_spd', String(s.spd))
+      if (moveName.trim()) p.set('mov', moveName.trim())
+    } else if (goal === 'ohko' || goal === '2hko') {
+      p.set('atacante', myEntry.id)
+      if (myMega) p.set('mega', myMega.megaName)
+      if (myNature !== 'Jolly') p.set('naturaleza', myNature)
+      if (s.atk) p.set('atk', String(s.atk))
+      if (s.spa) p.set('spa', String(s.spa))
+      if (defEntry) { p.set('def_pk', defEntry.id); if (defMega) p.set('def_mega', defMega.megaName) }
+      if (koMove.trim()) p.set('mov', koMove.trim())
+    } else {
+      p.set('atacante', myEntry.id)
+      if (myMega) p.set('mega', myMega.megaName)
+      if (myNature !== 'Jolly') p.set('naturaleza', myNature)
+      if (s.spe) p.set('spe', String(s.spe))
+    }
+
+    return `/calculator?${p.toString()}`
   })() : '#'
 
   const atkTopMoves = atkMeta?.top_moves?.slice(0, 6) ?? []
@@ -420,25 +552,36 @@ export default function SPOptimizer() {
   return (
     <div className="space-y-6">
 
+      {/* ── Page header ── */}
+      <div>
+        <h1 className="font-display text-4xl font-bold text-white">{t('opt.title')}</h1>
+        <p className="text-champ-muted font-body text-sm mt-1">{t('opt.subtitle')}</p>
+      </div>
+
       {/* ── Mi Pokémon ── */}
       <div className="bg-champ-surface border border-champ-border rounded-xl p-5 space-y-4">
-        <h2 className="font-display text-lg font-bold text-white">Mi Pokémon</h2>
-        <PokemonPicker value={myEntry} onChange={handleMyEntry} label="Pokémon a optimizar" />
+        <h2 className="font-display text-lg font-bold text-white">{t('opt.myPokemon')}</h2>
+        <PokemonPicker value={myEntry} onChange={handleMyEntry} label={t('opt.pokemonToOpt')} />
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-champ-muted font-body block mb-1">Naturaleza</label>
+            <label className="text-xs text-champ-muted font-body block mb-1">{t('common.nature')}</label>
             <NatureSelect value={myNature} onChange={n => { setMyNature(n); setResult(null) }} />
           </div>
           <div>
-            <label className="text-xs text-champ-muted font-body block mb-1">Habilidad</label>
-            <input value={myAbility} onChange={e => setMyAbility(e.target.value)}
-              placeholder="ej. Multiscale" className={INPUT_CLS} />
+            <label className="text-xs text-champ-muted font-body block mb-1">{t('common.ability')}</label>
+            <AbilityInput
+              value={myAbility}
+              onChange={v => { setMyAbility(v); setResult(null) }}
+              pokeapiName={myEntry?.pokeapiName}
+            />
             {(myMeta?.top_abilities?.length ?? 0) > 0 && (
               <div className="flex gap-1 mt-1.5 flex-wrap">
                 {myMeta!.top_abilities.slice(0, 3).map(a => (
-                  <button key={a.name} type="button" onClick={() => setMyAbility(a.name)}
-                    className={`${CHIP_BASE} ${myAbility === a.name ? CHIP_ON : CHIP_OFF}`}>{a.name}</button>
+                  <button key={a.name} type="button" onClick={() => { setMyAbility(a.name); setResult(null) }}
+                    className={`${CHIP_BASE} ${myAbility === a.name ? CHIP_ON : CHIP_OFF}`}>
+                    {lang === 'es' ? (myAbES[a.name] ?? a.name) : a.name}
+                  </button>
                 ))}
               </div>
             )}
@@ -446,14 +589,15 @@ export default function SPOptimizer() {
         </div>
 
         <div>
-          <label className="text-xs text-champ-muted font-body block mb-1">Objeto</label>
-          <input value={myItem} onChange={e => setMyItem(e.target.value)}
-            placeholder="ej. Assault Vest" className={INPUT_CLS} />
+          <label className="text-xs text-champ-muted font-body block mb-1">{t('common.item')}</label>
+          <ItemInput value={myItem} onChange={v => { setMyItem(v); setResult(null) }} />
           {(myMeta?.top_items?.length ?? 0) > 0 && (
             <div className="flex gap-1 mt-1.5 flex-wrap">
               {myMeta!.top_items.slice(0, 4).map(it => (
-                <button key={it.name} type="button" onClick={() => setMyItem(it.name)}
-                  className={`${CHIP_BASE} ${myItem === it.name ? CHIP_ON : CHIP_OFF}`}>{it.name}</button>
+                <button key={it.name} type="button" onClick={() => { setMyItem(it.name); setResult(null) }}
+                  className={`${CHIP_BASE} ${myItem === it.name ? CHIP_ON : CHIP_OFF}`}>
+                  {lang === 'es' ? (myItemES[it.name] ?? it.name) : it.name}
+                </button>
               ))}
             </div>
           )}
@@ -462,10 +606,10 @@ export default function SPOptimizer() {
         {/* Mega */}
         {myEntry?.hasMega && (
           <div>
-            <label className="text-xs text-champ-muted font-body block mb-1">Forma · Omni Ring</label>
+            <label className="text-xs text-champ-muted font-body block mb-1">{t('calc.form')}</label>
             <div className="flex gap-1.5 flex-wrap">
               <button type="button" onClick={() => handleMyMega(null)}
-                className={`${CHIP_BASE} px-3 py-1 ${!myMega ? CHIP_ON : CHIP_OFF}`}>Base</button>
+                className={`${CHIP_BASE} px-3 py-1 ${!myMega ? CHIP_ON : CHIP_OFF}`}>{t('common.base')}</button>
               {myMegas.map(mega => (
                 <button key={mega.megaName} type="button" onClick={() => handleMyMega(mega)}
                   className={`${CHIP_BASE} px-3 py-1 ${myMega?.megaName === mega.megaName ? GOLD_ON : GOLD_OFF}`}>
@@ -475,7 +619,7 @@ export default function SPOptimizer() {
             </div>
             {myMega && (
               <p className="text-xs text-champ-muted font-body mt-1">
-                Habilidad: <span className="text-champ-gold">{myMega.megaAbility}</span>
+                {t('calc.ability')}<span className="text-champ-gold">{myMega.megaAbility}</span>
               </p>
             )}
           </div>
@@ -484,7 +628,7 @@ export default function SPOptimizer() {
 
       {/* ── Objetivo ── */}
       <div className="bg-champ-surface border border-champ-border rounded-xl p-5 space-y-4">
-        <h2 className="font-display text-lg font-bold text-white">Objetivo</h2>
+        <h2 className="font-display text-lg font-bold text-white">{t('opt.goal')}</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {GOALS.map(g => (
             <button
@@ -506,25 +650,29 @@ export default function SPOptimizer() {
         {/* ── Survive form ── */}
         {goal === 'survive' && (
           <div className="border-t border-champ-border/50 pt-4 space-y-4">
-            <p className="text-xs text-champ-muted font-body">Configura el atacante que quieres aguantar.</p>
+            <p className="text-xs text-champ-muted font-body">{t('opt.surviveHint')}</p>
 
-            <PokemonPicker value={atkEntry} onChange={handleAtkEntry} label="Pokémon atacante" />
+            <PokemonPicker value={atkEntry} onChange={handleAtkEntry} label={t('opt.attackerPokemon')} />
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Naturaleza atacante</label>
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.attackerNature')}</label>
                 <NatureSelect value={atkNature} onChange={n => { setAtkNature(n); setResult(null) }} />
               </div>
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Movimiento</label>
-                <input value={moveName} onChange={e => { setMoveName(e.target.value); setResult(null) }}
-                  placeholder="ej. Earthquake" className={INPUT_CLS} />
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.attackerMove')}</label>
+                <MoveInput
+                  value={moveName}
+                  onChange={v => { setMoveName(v); setResult(null) }}
+                  pokeapiName={atkEntry?.pokeapiName}
+                  placeholder={lang === 'es' ? 'ej. Terremoto' : 'e.g. Earthquake'}
+                />
                 {atkTopMoves.length > 0 && (
                   <div className="flex gap-1 mt-1.5 flex-wrap">
                     {atkTopMoves.map(m => (
                       <button key={m.name} type="button" onClick={() => { setMoveName(m.name); setResult(null) }}
                         className={`${CHIP_BASE} ${moveName === m.name ? CHIP_ON : CHIP_OFF}`}>
-                        {m.name}
+                        {lang === 'es' ? (atkMoveES[m.name] ?? m.name) : m.name}
                       </button>
                     ))}
                   </div>
@@ -535,16 +683,16 @@ export default function SPOptimizer() {
             <AbilityItemInputs
               ability={atkAbility} item={atkItem}
               onAbility={v => setAtkAbility(v)} onItem={v => setAtkItem(v)}
-              meta={atkMeta}
+              meta={atkMeta} pokeapiName={atkEntry?.pokeapiName}
             />
 
             {/* Mega atacante */}
             {atkEntry?.hasMega && (
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Forma atacante · Omni Ring</label>
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.atkMegaForm')}</label>
                 <div className="flex gap-1.5 flex-wrap">
                   <button type="button" onClick={() => handleAtkMega(null)}
-                    className={`${CHIP_BASE} px-3 py-1 ${!atkMega ? CHIP_ON : CHIP_OFF}`}>Base</button>
+                    className={`${CHIP_BASE} px-3 py-1 ${!atkMega ? CHIP_ON : CHIP_OFF}`}>{t('common.base')}</button>
                   {atkMegas.map(mega => (
                     <button key={mega.megaName} type="button" onClick={() => handleAtkMega(mega)}
                       className={`${CHIP_BASE} px-3 py-1 ${atkMega?.megaName === mega.megaName ? GOLD_ON : GOLD_OFF}`}>
@@ -554,14 +702,14 @@ export default function SPOptimizer() {
                 </div>
                 {atkMega && (
                   <p className="text-xs text-champ-muted font-body mt-1">
-                    Habilidad: <span className="text-champ-gold">{atkMega.megaAbility}</span>
+                    {t('calc.ability')}<span className="text-champ-gold">{atkMega.megaAbility}</span>
                   </p>
                 )}
               </div>
             )}
 
             <div>
-              <p className="text-xs text-champ-muted font-body mb-2">Inversión SP del atacante</p>
+              <p className="text-xs text-champ-muted font-body mb-2">{t('opt.atkInvestment')}</p>
               <SPSlider
                 key={`${atkEntry?.id ?? 'empty-atk'}-${atkMega?.megaName ?? 'base'}`}
                 baseStats={atkDisplayStats}
@@ -571,30 +719,28 @@ export default function SPOptimizer() {
               />
             </div>
 
-            {/* Condiciones de campo */}
             <FieldConditions
               weather={surviveWeather} terrain={surviveTerrain}
               onWeather={v => { setSurviveWeather(v); setResult(null) }}
               onTerrain={v => { setSurviveTerrain(v); setResult(null) }}
             />
 
-            {/* Modificadores del atacante */}
             <div className="space-y-2">
-              <label className="text-xs text-champ-muted font-body block">Modificadores del atacante</label>
+              <label className="text-xs text-champ-muted font-body block">{t('opt.atkMods')}</label>
               <div className="flex flex-wrap gap-2 items-center">
                 <button type="button"
                   onClick={() => { setSurviveCrit(v => !v); setResult(null) }}
                   className={`${CHIP_BASE} px-3 py-1.5 ${surviveCrit ? CHIP_ON : CHIP_OFF}`}>
-                  Golpe Crítico
+                  {t('calc.critHit')}
                 </button>
                 <button type="button"
                   onClick={() => { setSurviveHH(v => !v); setResult(null) }}
                   className={`${CHIP_BASE} px-3 py-1.5 ${surviveHH ? CHIP_ON : CHIP_OFF}`}>
-                  Ayuda Extra
+                  {t('calc.helpingHand')}
                 </button>
                 <div className="ml-auto">
                   <BoostStepper
-                    label="Boost Atk/SpA"
+                    label={`${t('calc.boost')} Atk/SpA`}
                     value={atkBoost}
                     onChange={v => { setAtkBoost(v); setResult(null) }}
                   />
@@ -607,27 +753,29 @@ export default function SPOptimizer() {
         {/* ── KO form ── */}
         {(goal === 'ohko' || goal === '2hko') && (
           <div className="border-t border-champ-border/50 pt-4 space-y-4">
-            <p className="text-xs text-champ-muted font-body">
-              Configura el defensor objetivo. Ajusta su spread SP para modelar escenarios reales.
-            </p>
+            <p className="text-xs text-champ-muted font-body">{t('opt.koHint')}</p>
 
-            <PokemonPicker value={defEntry} onChange={handleDefEntry} label="Pokémon defensor" />
+            <PokemonPicker value={defEntry} onChange={handleDefEntry} label={t('opt.defenderPokemon')} />
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Naturaleza defensor</label>
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.defenderNature')}</label>
                 <NatureSelect value={defNature} onChange={n => { setDefNature(n); setResult(null) }} />
               </div>
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Movimiento a usar</label>
-                <input value={koMove} onChange={e => { setKoMove(e.target.value); setResult(null) }}
-                  placeholder="ej. Flamethrower" className={INPUT_CLS} />
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.koMove')}</label>
+                <MoveInput
+                  value={koMove}
+                  onChange={v => { setKoMove(v); setResult(null) }}
+                  pokeapiName={myEntry?.pokeapiName}
+                  placeholder={lang === 'es' ? 'ej. Lanzallamas' : 'e.g. Flamethrower'}
+                />
                 {myTopMoves.length > 0 && (
                   <div className="flex gap-1 mt-1.5 flex-wrap">
                     {myTopMoves.map(m => (
                       <button key={m.name} type="button" onClick={() => { setKoMove(m.name); setResult(null) }}
                         className={`${CHIP_BASE} ${koMove === m.name ? CHIP_ON : CHIP_OFF}`}>
-                        {m.name}
+                        {lang === 'es' ? (myMoveES[m.name] ?? m.name) : m.name}
                       </button>
                     ))}
                   </div>
@@ -638,16 +786,16 @@ export default function SPOptimizer() {
             <AbilityItemInputs
               ability={defAbility} item={defItem}
               onAbility={v => setDefAbility(v)} onItem={v => setDefItem(v)}
-              meta={defMeta}
+              meta={defMeta} pokeapiName={defEntry?.pokeapiName}
             />
 
             {/* Mega defensor */}
             {defEntry?.hasMega && (
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Forma defensor · Omni Ring</label>
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.defMegaForm')}</label>
                 <div className="flex gap-1.5 flex-wrap">
                   <button type="button" onClick={() => handleDefMega(null)}
-                    className={`${CHIP_BASE} px-3 py-1 ${!defMega ? CHIP_ON : CHIP_OFF}`}>Base</button>
+                    className={`${CHIP_BASE} px-3 py-1 ${!defMega ? CHIP_ON : CHIP_OFF}`}>{t('common.base')}</button>
                   {defMegas.map(mega => (
                     <button key={mega.megaName} type="button" onClick={() => handleDefMega(mega)}
                       className={`${CHIP_BASE} px-3 py-1 ${defMega?.megaName === mega.megaName ? GOLD_ON : GOLD_OFF}`}>
@@ -657,34 +805,32 @@ export default function SPOptimizer() {
                 </div>
                 {defMega && (
                   <p className="text-xs text-champ-muted font-body mt-1">
-                    Habilidad: <span className="text-champ-gold">{defMega.megaAbility}</span>
+                    {t('calc.ability')}<span className="text-champ-gold">{defMega.megaAbility}</span>
                   </p>
                 )}
               </div>
             )}
 
-            {/* Condiciones de campo */}
             <FieldConditions
               weather={koWeather} terrain={koTerrain}
               onWeather={v => { setKoWeather(v); setResult(null) }}
               onTerrain={v => { setKoTerrain(v); setResult(null) }}
             />
 
-            {/* Boost ofensivo propio */}
             <BoostStepper
-              label="Boost Atk/SpA propio"
+              label={`${t('calc.boost')} Atk/SpA`}
               value={myBoost}
               onChange={v => { setMyBoost(v); setResult(null) }}
             />
 
             <div>
-              <label className="text-xs text-champ-muted font-body block mb-2">Stat a optimizar</label>
+              <label className="text-xs text-champ-muted font-body block mb-2">{t('opt.statToOpt')}</label>
               <div className="flex gap-2">
                 {(['atk', 'spa'] as const).map(s => (
                   <button key={s} type="button"
                     onClick={() => { setStatToOpt(s); setResult(null) }}
                     className={`${CHIP_BASE} px-4 py-1.5 ${statToOpt === s ? CHIP_ON : CHIP_OFF}`}>
-                    {s === 'atk' ? 'Físico (Atk)' : 'Especial (SpA)'}
+                    {s === 'atk' ? t('opt.physical') : t('opt.special')}
                   </button>
                 ))}
               </div>
@@ -692,7 +838,7 @@ export default function SPOptimizer() {
 
             {defEntry && (
               <div>
-                <p className="text-xs text-champ-muted font-body mb-2">Inversión SP del defensor</p>
+                <p className="text-xs text-champ-muted font-body mb-2">{t('opt.defInvestment')}</p>
                 <SPSlider
                   key={`${defEntry.id}-${defMega?.megaName ?? 'base'}`}
                   baseStats={defDisplayStats}
@@ -708,18 +854,18 @@ export default function SPOptimizer() {
         {/* ── Speed tier form ── */}
         {goal === 'speed_tier' && (
           <div className="border-t border-champ-border/50 pt-4 space-y-4">
-            <p className="text-xs text-champ-muted font-body">Define el rival que quieres superar en velocidad.</p>
+            <p className="text-xs text-champ-muted font-body">{t('opt.speedHint')}</p>
 
-            <PokemonPicker value={rivalEntry} onChange={e => { setRivalEntry(e); setResult(null) }} label="Pokémon rival" />
+            <PokemonPicker value={rivalEntry} onChange={e => { setRivalEntry(e); setResult(null) }} label={t('opt.rivalPokemon')} />
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-champ-muted font-body block mb-1">Naturaleza rival</label>
+                <label className="text-xs text-champ-muted font-body block mb-1">{t('opt.rivalNature')}</label>
                 <NatureSelect value={rivalNature} onChange={n => { setRivalNature(n); setResult(null) }} />
               </div>
               <div>
                 <label className="text-xs text-champ-muted font-body block mb-1">
-                  SP en Spe del rival
+                  {t('opt.rivalSPE')}
                   {rivalEntry && rivalFinalSpe > 0 && (
                     <span className="text-champ-gold ml-2 font-mono">{rivalFinalSpe} Spe</span>
                   )}
@@ -735,19 +881,18 @@ export default function SPOptimizer() {
               </div>
             </div>
 
-            {/* Viento Cola */}
             <div>
-              <label className="text-xs text-champ-muted font-body block mb-2">Viento Cola activo</label>
+              <label className="text-xs text-champ-muted font-body block mb-2">{t('opt.tailwind')}</label>
               <div className="flex gap-2">
                 <button type="button"
                   onClick={() => { setMyTailwind(v => !v); setResult(null) }}
                   className={`${CHIP_BASE} px-3 py-1.5 ${myTailwind ? CHIP_ON : CHIP_OFF}`}>
-                  Mi equipo
+                  {t('opt.myTeam')}
                 </button>
                 <button type="button"
                   onClick={() => { setRivalTailwind(v => !v); setResult(null) }}
                   className={`${CHIP_BASE} px-3 py-1.5 ${rivalTailwind ? CHIP_ON : CHIP_OFF}`}>
-                  Equipo rival
+                  {t('opt.rivalTeam')}
                 </button>
               </div>
             </div>
@@ -756,20 +901,23 @@ export default function SPOptimizer() {
       </div>
 
       {/* ── Optimize button ── */}
-      <button
-        onClick={handleOptimize}
-        disabled={isRunning || isLoadingStats}
-        className="w-full py-3 bg-champ-gold hover:bg-champ-gold/80 text-black font-display text-lg font-bold rounded-xl transition-colors shadow-lg shadow-champ-gold/20 disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {isRunning ? 'Optimizando...' : isLoadingStats ? 'Cargando stats...' : 'Optimizar Spread'}
-      </button>
+      <div className="space-y-2">
+        <button
+          onClick={handleOptimize}
+          disabled={isRunning || isLoadingStats}
+          className="w-full py-3 bg-champ-gold hover:bg-champ-gold/80 text-black font-display text-lg font-bold rounded-xl transition-colors shadow-lg shadow-champ-gold/20 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isRunning ? t('opt.optimizing') : isLoadingStats ? t('calc.loadingStats') : t('opt.optimize')}
+        </button>
+        {isLoadingStats && (
+          <p className="text-center text-xs text-champ-muted font-body animate-pulse">
+            {t('opt.loadingPokeAPI')}
+          </p>
+        )}
+      </div>
 
       {/* ── Error ── */}
-      {calcError && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-          <p className="text-red-400 font-body text-sm">{calcError}</p>
-        </div>
-      )}
+      {calcError && <ErrorToast message={calcError} onDismiss={() => setCalcError(null)} />}
 
       {/* ── Result ── */}
       {result && !calcError && (
@@ -780,14 +928,13 @@ export default function SPOptimizer() {
         }`}>
           {result.success && finalStats ? (
             <>
-              {/* Header */}
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                  <h3 className="font-display text-xl font-bold text-white">Distribución óptima</h3>
+                  <h3 className="font-display text-xl font-bold text-white">{t('opt.resultTitle')}</h3>
                   <p className="text-champ-muted text-xs font-body mt-0.5">
-                    {result.totalSP} SP invertidos · {' '}
-                    <span className="text-champ-gold font-semibold">{result.remainingSP} SP libres</span>
-                    {' '}para otras stats
+                    {t('opt.spInvested', { total: String(result.totalSP) })}{' '}
+                    <span className="text-champ-gold font-semibold">{t('opt.spFree', { remaining: String(result.remainingSP) })}</span>
+                    {' '}{t('opt.spFreeFor')}
                   </p>
                 </div>
                 <div className="text-right">
@@ -796,7 +943,6 @@ export default function SPOptimizer() {
                 </div>
               </div>
 
-              {/* SP bar chart */}
               <div className="bg-champ-elevated rounded-xl p-4 space-y-1">
                 {STAT_META.map(({ key, label, color }) => (
                   <StatBar
@@ -810,35 +956,34 @@ export default function SPOptimizer() {
                 ))}
               </div>
 
-              {/* SP remaining visual */}
               <div>
                 <div className="flex justify-between text-xs font-body text-champ-muted mb-1.5">
-                  <span>SP usados</span>
+                  <span>{t('opt.spUsed')}</span>
                   <span>{result.totalSP} / 66</span>
                 </div>
                 <div className="h-2 bg-champ-border rounded-full overflow-hidden">
                   <div className="h-full bg-champ-gold rounded-full" style={{ width: `${(result.totalSP / 66) * 100}%` }} />
                 </div>
-                <p className="text-right text-xs text-champ-gold font-mono mt-1">{result.remainingSP} SP libres</p>
+                <p className="text-right text-xs text-champ-gold font-mono mt-1">
+                  {t('opt.spFree', { remaining: String(result.remainingSP) })}
+                </p>
               </div>
 
-              {/* Verification */}
               <div className="border-t border-champ-border/40 pt-4">
-                <p className="text-champ-success text-sm font-body font-semibold mb-1">Verificacion</p>
+                <p className="text-champ-success text-sm font-body font-semibold mb-1">{t('opt.verification')}</p>
                 <p className="text-white text-sm font-mono">{result.verificationText}</p>
               </div>
 
-              {/* Open in calculator */}
               <Link
                 href={calcUrl}
                 className="flex items-center justify-center gap-2 w-full py-2.5 bg-champ-blue/20 hover:bg-champ-blue/30 border border-champ-blue/40 rounded-lg text-champ-blue text-sm font-bold font-body transition-colors"
               >
-                Abrir en Calculadora de Daño
+                {t('opt.openInCalc')}
               </Link>
             </>
           ) : (
             <div className="text-center py-4">
-              <p className="text-red-400 font-body font-semibold mb-1">Sin solución posible</p>
+              <p className="text-red-400 font-body font-semibold mb-1">{t('opt.noSolution')}</p>
               <p className="text-champ-muted text-sm font-body">{result.failText}</p>
             </div>
           )}
