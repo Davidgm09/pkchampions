@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@smogon/calc": "^0.11.0",
+    "@vercel/analytics": "^2.0.1",
     "cheerio": "^1.2.0",
     "next": "16.2.9",
     "react": "19.2.4",

@@ -3,6 +3,7 @@ import { Inter, Rajdhani } from 'next/font/google'
 import './globals.css'
 import Navbar from '@/components/nav/Navbar'
 import { LanguageProvider } from '@/contexts/LanguageContext'
+import { Analytics } from '@vercel/analytics/next'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -47,6 +48,7 @@ export default function RootLayout({
             {children}
           </main>
         </LanguageProvider>
+        <Analytics />
       </body>
     </html>
   )
